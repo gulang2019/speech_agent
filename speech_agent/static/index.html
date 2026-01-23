@@ -1,0 +1,195 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>WebSocket Streaming ASR</title>
+  <style>
+    body { font-family: sans-serif; margin: 24px; }
+    button { margin-right: 8px; }
+    #log { white-space: pre-wrap; border: 1px solid #ddd; padding: 12px; height: 280px; overflow: auto; }
+    #status { margin-top: 8px; color: #444; }
+  </style>
+</head>
+<body>
+  <h2>WebSocket Streaming ASR</h2>
+
+  <div>
+    <button id="connect">Connect</button>
+    <button id="start" disabled>Start Mic</button>
+    <button id="eos" disabled>Send &lt;eos&gt;</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+
+  <div id="status">status: idle</div>
+  <h3>Transcript</h3>
+  <div id="log"></div>
+
+<script>
+let ws = null;
+let audioCtx = null;
+let micStream = null;
+let processor = null;
+
+let engineSampleRate = 16000;
+let frameSize = 320;
+
+// buffers
+let downsampleBuf = new Float32Array(0);
+
+const logEl = document.getElementById("log");
+const statusEl = document.getElementById("status");
+
+function setStatus(s) { statusEl.textContent = "status: " + s; }
+function log(msg) {
+  logEl.textContent += msg;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// Linear downsample from inputRate to targetRate.
+// Good enough for demo ASR. For best quality use a proper resampler / AudioWorklet.
+function downsampleLinear(input, inputRate, targetRate) {
+  if (targetRate === inputRate) return input;
+
+  const ratio = inputRate / targetRate;
+  const newLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(newLen);
+
+  for (let i = 0; i < newLen; i++) {
+    const srcPos = i * ratio;
+    const idx0 = Math.floor(srcPos);
+    const idx1 = Math.min(idx0 + 1, input.length - 1);
+    const frac = srcPos - idx0;
+    out[i] = input[idx0] * (1 - frac) + input[idx1] * frac;
+  }
+  return out;
+}
+
+function appendBuffer(a, b) {
+  const out = new Float32Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+async function connectWS() {
+  const proto = (location.protocol === "https:") ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => {
+    setStatus("ws open");
+    document.getElementById("start").disabled = false;
+    document.getElementById("stop").disabled = false;
+    document.getElementById("eos").disabled = false;
+  };
+
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === "string") {
+      // first message is JSON hello
+      try {
+        const obj = JSON.parse(ev.data);
+        if (obj && obj.type === "hello") {
+          engineSampleRate = obj.sample_rate;
+          frameSize = obj.frame_size;
+          log(`\n[hello] sr=${engineSampleRate} frameSize=${frameSize}\n`);
+          return;
+        }
+      } catch {}
+
+      if (ev.data === "<eoa>") {
+        log("\n\n[<eoa>]\n\n");
+      } else {
+        // token stream
+        log(ev.data);
+      }
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus("ws closed");
+    ws = null;
+  };
+
+  ws.onerror = (e) => {
+    console.error(e);
+    setStatus("ws error");
+  };
+}
+
+async function startMic() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    alert("WebSocket not connected");
+    return;
+  }
+
+  setStatus("starting mic...");
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+  // Use AudioContext at default (often 48k). We'll downsample to engineSampleRate.
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(micStream);
+
+  // ScriptProcessor is deprecated but widely available and simplest for a demo.
+  // For production, use AudioWorklet.
+  const bufSize = 4096;
+  processor = audioCtx.createScriptProcessor(bufSize, 1, 1);
+
+  source.connect(processor);
+  processor.connect(audioCtx.destination);
+
+  processor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const input = e.inputBuffer.getChannelData(0); // Float32
+    const ds = downsampleLinear(input, audioCtx.sampleRate, engineSampleRate);
+
+    downsampleBuf = appendBuffer(downsampleBuf, ds);
+
+    // Emit fixed-size frames
+    while (downsampleBuf.length >= frameSize) {
+      const frame = downsampleBuf.slice(0, frameSize);
+      downsampleBuf = downsampleBuf.slice(frameSize);
+
+      // Send as binary Float32Array (ArrayBuffer)
+      ws.send(frame.buffer);
+    }
+  };
+
+  setStatus("mic streaming");
+}
+
+function sendEOS() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send("<eos>");
+    log("\n[client] <eos>\n");
+  }
+}
+
+async function stopAll() {
+  setStatus("stopping...");
+  if (processor) {
+    processor.disconnect();
+    processor = null;
+  }
+  if (audioCtx) {
+    await audioCtx.close();
+    audioCtx = null;
+  }
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
+  setStatus("stopped");
+}
+
+document.getElementById("connect").onclick = connectWS;
+document.getElementById("start").onclick = startMic;
+document.getElementById("eos").onclick = sendEOS;
+document.getElementById("stop").onclick = stopAll;
+</script>
+</body>
+</html>

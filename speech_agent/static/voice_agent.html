@@ -1,0 +1,611 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Voice Agent</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap");
+
+      :root {
+        --bg: #f6f1e8;
+        --bg-2: #fdf6ef;
+        --ink: #122524;
+        --muted: #5b6b68;
+        --accent: #ef6c36;
+        --accent-2: #0ea5a4;
+        --panel: #ffffff;
+        --panel-border: #e7ded2;
+        --chip: #eef1ed;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Helvetica Neue", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(800px 400px at 15% 10%, #f8d7b6 0%, transparent 70%),
+          radial-gradient(700px 350px at 90% 5%, #b7ece7 0%, transparent 65%),
+          linear-gradient(180deg, var(--bg), var(--bg-2));
+        min-height: 100vh;
+      }
+
+      .app {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 24px 48px;
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 20px;
+      }
+
+      header {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      header h1 {
+        font-size: 28px;
+        margin: 0;
+        letter-spacing: -0.02em;
+      }
+
+      header p {
+        margin: 4px 0 0;
+        color: var(--muted);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: var(--chip);
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        padding: 18px;
+        box-shadow: 0 10px 24px rgba(18, 37, 36, 0.08);
+      }
+
+      .controls {
+        grid-column: 1 / span 4;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .controls button {
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+      }
+
+      .controls button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .primary {
+        background: linear-gradient(135deg, var(--accent), #f0a14d);
+        color: #fff;
+        box-shadow: 0 10px 18px rgba(239, 108, 54, 0.35);
+      }
+
+      .secondary {
+        background: #f1f2ef;
+        color: var(--ink);
+        border: 1px solid #e1e4de;
+      }
+
+      .ghost {
+        background: transparent;
+        color: var(--ink);
+        border: 1px dashed #c7cfc8;
+      }
+
+      .status-line {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px;
+        border-radius: 12px;
+        background: #f7f4ef;
+        font-size: 13px;
+      }
+
+      .status-line span {
+        color: var(--muted);
+      }
+
+      .io {
+        grid-column: 5 / -1;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 18px;
+      }
+
+      .io h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .transcript {
+        min-height: 140px;
+        background: #fbfaf7;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid #eee6db;
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+
+      .assistant {
+        min-height: 140px;
+        background: #f6fbfb;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid #d9efee;
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+
+      .history {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 420px;
+        overflow: auto;
+        padding-right: 6px;
+      }
+
+      .bubble {
+        padding: 12px 14px;
+        border-radius: 14px;
+        line-height: 1.5;
+        font-size: 14px;
+        border: 1px solid transparent;
+      }
+
+      .bubble.user {
+        align-self: flex-end;
+        background: #fff4e8;
+        border-color: #f1d1b5;
+      }
+
+      .bubble.assistant {
+        align-self: flex-start;
+        background: #eef9f8;
+        border-color: #c5ece9;
+      }
+
+      .mono {
+        font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .input-row {
+        display: flex;
+        gap: 10px;
+      }
+
+      .input-row input {
+        flex: 1;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #dad6ce;
+        font-family: inherit;
+      }
+
+      @media (max-width: 900px) {
+        .controls {
+          grid-column: 1 / -1;
+        }
+        .io {
+          grid-column: 1 / -1;
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <div>
+          <h1>Local Voice Agent</h1>
+          <p>STT + vLLM + TTS, all on your machine</p>
+        </div>
+        <div class="badge" id="status">status: idle</div>
+      </header>
+
+      <section class="panel controls">
+        <button id="connect" class="primary">Connect</button>
+        <button id="hold" class="secondary" disabled>Hold to Talk</button>
+        <button id="stop" class="secondary" disabled>Stop</button>
+        <button id="reset" class="ghost" disabled>Reset</button>
+        <div class="status-line">
+          <div><strong>Input</strong> <span id="inputMeta">waiting for hello...</span></div>
+          <div><strong>Output</strong> <span id="outputMeta">waiting for hello...</span></div>
+          <div><strong>Model</strong> <span id="modelMeta">unknown</span></div>
+        </div>
+      </section>
+
+      <section class="io">
+        <div class="panel">
+          <h3>Live Transcript</h3>
+          <div id="sttLive" class="transcript"></div>
+          <h3>Final Transcript</h3>
+          <div id="sttFinal" class="transcript"></div>
+        </div>
+        <div class="panel">
+          <h3>Chat History</h3>
+          <div id="chatHistory" class="history"></div>
+          <div class="mono" id="ttsStatus">tts: waiting</div>
+          <div class="input-row">
+            <input id="manualText" type="text" placeholder="Type a prompt and send to vLLM" />
+            <button id="sendText" class="secondary">Send</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      let ws = null;
+      let inputCtx = null;
+      let outputCtx = null;
+      let micStream = null;
+      let inputProcessor = null;
+      let outputProcessor = null;
+
+      let inputSampleRate = 16000;
+      let inputFrameSize = 320;
+      let outputSampleRate = 24000;
+      let outputFrameSize = 480;
+
+      let downsampleBuf = new Float32Array(0);
+      let playQueue = [];
+      let playOffset = 0;
+      let fadeSamplesLeft = 0;
+      let micActive = false;
+      let canTalk = false;
+
+      const statusEl = document.getElementById("status");
+      const inputMetaEl = document.getElementById("inputMeta");
+      const outputMetaEl = document.getElementById("outputMeta");
+      const modelMetaEl = document.getElementById("modelMeta");
+      const sttLiveEl = document.getElementById("sttLive");
+      const sttFinalEl = document.getElementById("sttFinal");
+      const chatHistoryEl = document.getElementById("chatHistory");
+      const ttsStatusEl = document.getElementById("ttsStatus");
+      let assistantBubble = null;
+
+      function setStatus(s) {
+        statusEl.textContent = "status: " + s;
+      }
+
+      function downsampleLinear(input, inputRate, targetRate) {
+        if (targetRate === inputRate) return input;
+        const ratio = inputRate / targetRate;
+        const newLen = Math.floor(input.length / ratio);
+        const out = new Float32Array(newLen);
+        for (let i = 0; i < newLen; i++) {
+          const srcPos = i * ratio;
+          const idx0 = Math.floor(srcPos);
+          const idx1 = Math.min(idx0 + 1, input.length - 1);
+          const frac = srcPos - idx0;
+          out[i] = input[idx0] * (1 - frac) + input[idx1] * frac;
+        }
+        return out;
+      }
+
+      function appendBuffer(a, b) {
+        const out = new Float32Array(a.length + b.length);
+        out.set(a, 0);
+        out.set(b, a.length);
+        return out;
+      }
+
+      function addChatBubble(role, text) {
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${role}`;
+        bubble.textContent = text;
+        chatHistoryEl.appendChild(bubble);
+        chatHistoryEl.scrollTop = chatHistoryEl.scrollHeight;
+        return bubble;
+      }
+
+      function ensureOutputAudio() {
+        if (outputCtx) return;
+        outputCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate: outputSampleRate,
+        });
+        const bufSize = 4096;
+        outputProcessor = outputCtx.createScriptProcessor(bufSize, 1, 1);
+        outputProcessor.onaudioprocess = (e) => {
+          const out = e.outputBuffer.getChannelData(0);
+          let written = 0;
+          while (written < out.length) {
+            if (playQueue.length === 0) {
+              out.fill(0, written);
+              break;
+            }
+            const chunk = playQueue[0];
+            const remaining = chunk.length - playOffset;
+            const toCopy = Math.min(remaining, out.length - written);
+            out.set(chunk.subarray(playOffset, playOffset + toCopy), written);
+            playOffset += toCopy;
+            written += toCopy;
+            if (playOffset >= chunk.length) {
+              playQueue.shift();
+              playOffset = 0;
+            }
+          }
+          if (fadeSamplesLeft > 0) {
+            const total = Math.max(1, fadeSamplesLeft);
+            for (let i = 0; i < out.length; i++) {
+              if (fadeSamplesLeft <= 0) break;
+              const gain = fadeSamplesLeft / total;
+              out[i] *= gain;
+              fadeSamplesLeft -= 1;
+            }
+          }
+        };
+        outputProcessor.connect(outputCtx.destination);
+        if (outputCtx.state === "suspended") {
+          outputCtx.resume();
+        }
+      }
+
+      function enqueueAudio(buf) {
+        if (!outputCtx) {
+          ensureOutputAudio();
+        }
+        let data = buf;
+        if (outputCtx.sampleRate !== outputSampleRate) {
+          data = downsampleLinear(data, outputSampleRate, outputCtx.sampleRate);
+        }
+        playQueue.push(data);
+      }
+
+      function stopPlayback() {
+        if (outputCtx) {
+          fadeSamplesLeft = Math.floor(outputCtx.sampleRate * 0.02);
+        }
+        playQueue = [];
+        playOffset = 0;
+      }
+
+      async function connectWS() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${proto}://${location.host}/ws`);
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          setStatus("ws open");
+          document.getElementById("stop").disabled = false;
+          document.getElementById("reset").disabled = false;
+          canTalk = true;
+          document.getElementById("hold").disabled = false;
+        };
+
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") {
+            let obj = null;
+            try {
+              obj = JSON.parse(ev.data);
+            } catch {
+              obj = null;
+            }
+            if (obj && obj.type === "hello") {
+              inputSampleRate = obj.input_sample_rate;
+              inputFrameSize = obj.input_frame_size;
+              outputSampleRate = obj.output_sample_rate;
+              outputFrameSize = obj.output_frame_size;
+              inputMetaEl.textContent = `${inputSampleRate} Hz, frame ${inputFrameSize}`;
+              outputMetaEl.textContent = `${outputSampleRate} Hz, frame ${outputFrameSize}`;
+              modelMetaEl.textContent = obj.llm_model || "unknown";
+              return;
+            }
+            if (obj && obj.type === "status") {
+              setStatus(obj.state);
+              if (obj.state === "thinking" || obj.state === "speaking") {
+                canTalk = false;
+                document.getElementById("hold").disabled = true;
+              } else {
+                canTalk = true;
+                document.getElementById("hold").disabled = false;
+              }
+              if (obj.state === "idle") {
+                ttsStatusEl.textContent = "tts: waiting";
+              }
+              return;
+            }
+            if (obj && obj.type === "stt") {
+              sttLiveEl.textContent += obj.text;
+              return;
+            }
+            if (obj && obj.type === "stt_final") {
+              sttFinalEl.textContent += obj.text + "\n";
+              sttLiveEl.textContent = "";
+              addChatBubble("user", obj.text);
+              return;
+            }
+            if (obj && obj.type === "llm") {
+              if (assistantBubble) {
+                assistantBubble.textContent = obj.text;
+              } else {
+                assistantBubble = addChatBubble("assistant", obj.text);
+              }
+              ttsStatusEl.textContent = "tts: speaking";
+              assistantBubble = null;
+              return;
+            }
+            if (obj && obj.type === "llm_delta") {
+              if (!assistantBubble) {
+                assistantBubble = addChatBubble("assistant", "");
+              }
+              assistantBubble.textContent += obj.text;
+              ttsStatusEl.textContent = "tts: speaking";
+              return;
+            }
+            if (obj && obj.type === "tts_end") {
+              ttsStatusEl.textContent = "tts: done";
+              return;
+            }
+            if (obj && obj.type === "error") {
+              ttsStatusEl.textContent = "error: " + obj.message;
+              return;
+            }
+          } else if (ev.data instanceof ArrayBuffer) {
+            const f32 = new Float32Array(ev.data);
+            enqueueAudio(f32);
+          }
+        };
+
+        ws.onclose = () => {
+          setStatus("ws closed");
+          ws = null;
+        };
+
+        ws.onerror = () => {
+          setStatus("ws error");
+        };
+      }
+
+      async function startMic() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          alert("WebSocket not connected");
+          return;
+        }
+        if (micActive) {
+          return;
+        }
+        ws.send(JSON.stringify({ type: "start_mic" }));
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        inputCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = inputCtx.createMediaStreamSource(micStream);
+        const bufSize = 4096;
+        inputProcessor = inputCtx.createScriptProcessor(bufSize, 1, 1);
+        source.connect(inputProcessor);
+        inputProcessor.connect(inputCtx.destination);
+
+        inputProcessor.onaudioprocess = (e) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          const input = e.inputBuffer.getChannelData(0);
+          const ds = downsampleLinear(input, inputCtx.sampleRate, inputSampleRate);
+          downsampleBuf = appendBuffer(downsampleBuf, ds);
+          while (downsampleBuf.length >= inputFrameSize) {
+            const frame = downsampleBuf.slice(0, inputFrameSize);
+            downsampleBuf = downsampleBuf.slice(inputFrameSize);
+            ws.send(frame.buffer);
+          }
+        };
+        micActive = true;
+        setStatus("mic streaming");
+      }
+
+      function sendEOS() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send("<eos>");
+        }
+      }
+
+      async function stopMic() {
+        if (inputProcessor) {
+          inputProcessor.disconnect();
+          inputProcessor = null;
+        }
+        if (inputCtx) {
+          await inputCtx.close();
+          inputCtx = null;
+        }
+        if (micStream) {
+          micStream.getTracks().forEach((t) => t.stop());
+          micStream = null;
+        }
+        downsampleBuf = new Float32Array(0);
+        micActive = false;
+      }
+
+      function sendManualText() {
+        const text = document.getElementById("manualText").value.trim();
+        if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "user_text", text }));
+        document.getElementById("manualText").value = "";
+      }
+
+      function resetAll() {
+        sttLiveEl.textContent = "";
+        sttFinalEl.textContent = "";
+        chatHistoryEl.textContent = "";
+        assistantBubble = null;
+        ttsStatusEl.textContent = "tts: waiting";
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "reset" }));
+        }
+      }
+
+      async function stopAll() {
+        if (inputProcessor) {
+          inputProcessor.disconnect();
+          inputProcessor = null;
+        }
+        if (inputCtx) {
+          await inputCtx.close();
+          inputCtx = null;
+        }
+        if (micStream) {
+          micStream.getTracks().forEach((t) => t.stop());
+          micStream = null;
+        }
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+        micActive = false;
+        setStatus("stopped");
+      }
+
+      document.getElementById("connect").onclick = connectWS;
+      const holdBtn = document.getElementById("hold");
+      holdBtn.onpointerdown = async (e) => {
+        e.preventDefault();
+        if (!canTalk) return;
+        stopPlayback();
+        holdBtn.textContent = "Listening...";
+        await startMic();
+      };
+      const releaseTalk = async () => {
+        if (!micActive) return;
+        holdBtn.textContent = "Hold to Talk";
+        sendEOS();
+        await stopMic();
+      };
+      holdBtn.onpointerup = releaseTalk;
+      holdBtn.onpointerleave = releaseTalk;
+      holdBtn.onpointercancel = releaseTalk;
+      document.getElementById("stop").onclick = stopAll;
+      document.getElementById("reset").onclick = resetAll;
+      document.getElementById("sendText").onclick = sendManualText;
+    </script>
+  </body>
+</html>
