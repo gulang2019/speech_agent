@@ -32,7 +32,7 @@ curl http://localhost:8000/completion \
 
 Setup the environment
 ```bash
-TODO
+pip install moshi
 ```
 
 In the first terminal 
