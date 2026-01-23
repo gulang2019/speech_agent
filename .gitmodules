@@ -1,0 +1,9 @@
+[submodule "3rdparty/delayed-streams-modeling"]
+	path = 3rdparty/delayed-streams-modeling
+	url = https://github.com/kyutai-labs/delayed-streams-modeling.git
+[submodule "3rdparty/nemo"]
+	path = 3rdparty/nemo
+	url = https://github.com/NVIDIA-NeMo/NeMo.git
+[submodule "3rdparty/vllm"]
+	path = 3rdparty/vllm
+	url = https://github.com/vllm-project/vllm.git
