@@ -15,10 +15,11 @@ from vllm.model_executor.model_loader import get_model_loader
 from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
 )
-from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
+# from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
+from vllm.attention import Attention
 from vllm.config import get_layers_from_vllm_config
-from vllm.v1.core.kv_cache_utils import get_kv_cache_configs
-from vllm.v1.worker.gpu.attn_utils import init_kv_cache, init_attn_backend
+from vllm.v1.core.kv_cache_utils import get_kv_cache_config
+from .vllm_attn_utils import init_kv_cache, init_attn_backend
 from vllm.v1.kv_cache_interface import (
     KVCacheConfig
 )
@@ -61,15 +62,15 @@ class ModelRunner:
     def _init_kv_cache(self):
 
         kv_cache_spec: dict[str, KVCacheSpec] = {}
-        layer_type = cast(type[Any], AttentionLayerBase)
+        layer_type = cast(type[Any], Attention)
         attn_layers = get_layers_from_vllm_config(self.vllm_config, layer_type)
         for layer_name, attn_module in attn_layers.items():
             # Skip modules that don't need KV cache (eg encoder-only attention)
             if spec := attn_module.get_kv_cache_spec(self.vllm_config):
                 kv_cache_spec[layer_name] = spec
         available_memory = self._compute_available_memory(self.vllm_config.cache_config.gpu_memory_utilization)
-        kv_cache_configs = get_kv_cache_configs(self.vllm_config, [kv_cache_spec], [available_memory])
-        self.kv_cache_config: KVCacheConfig = kv_cache_configs[0]
+        self.kv_cache_config: KVCacheConfig = get_kv_cache_config(self.vllm_config, [kv_cache_spec], [available_memory])
+        # self.kv_cache_config: KVCacheConfig = kv_cache_configs[0]
         logger.info(f'Allocate {available_memory / 1e9:.3f}Gb to KV Cache, #Blocks: {self.kv_cache_config.num_blocks}, #tokens {self.kv_cache_config.num_blocks * self.block_size}')
         attn_backends, self.attn_metadata_builders = init_attn_backend(
             self.kv_cache_config, 
