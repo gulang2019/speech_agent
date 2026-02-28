@@ -164,7 +164,6 @@ class PagedKVCacheManager:
         request.n_computed_tokens = len(cached_blocks) * self.block_size
         return True
     
-    
     def allocate(self, request: Request, n_new_tokens: int) -> bool:
         
         n_blocks_needed = self._get_num_needed_blocks(n_new_tokens + request.n_computed_tokens) - request.n_blocks

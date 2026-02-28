@@ -20,16 +20,18 @@ class Scheduler:
         return len(self.waiting_requests) or self.running_requests
     
     def schedule(self) -> Batch:
-        
+        # 1. Allocate memory for waiting requests
         while len(self.waiting_requests):
             front = self.waiting_requests[0]
             if self.memory_manager.allocate_prefill(front):
                 self.waiting_requests.popleft()
                 self.running_requests[front.req_id] = front
         
+        # 2. Compute the new batch.
         batch = Batch()
         
         for req in self.running_requests.values():
+            # If this request is in Prefill Phase
             if req.n_computed_tokens < req.n_prompt_tokens:
                 n_scheduled_tokens = req.n_prompt_tokens - req.n_computed_tokens
                 input_ids = req.prompt_ids[req.n_computed_tokens: req.n_computed_tokens + n_scheduled_tokens]

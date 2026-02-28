@@ -58,7 +58,6 @@ class ModelRunner:
         assert total_memory * utilization > used_memory, f"no memory available, {total_memory}, {used_memory}"
         return int(total_memory * utilization - used_memory) 
         
-    
     def _init_kv_cache(self):
 
         kv_cache_spec: dict[str, KVCacheSpec] = {}
@@ -152,6 +151,7 @@ class ModelRunner:
     def execute_batch(
         self, batch: Batch 
     ) -> BatchOutput:
+        
         attn_meta = self._build_attention_meta(batch)
         generated_tokens = {}
         with set_forward_context(attn_metadata=attn_meta, 

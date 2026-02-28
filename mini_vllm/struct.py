@@ -82,3 +82,4 @@ class Config:
     model_name: str
     max_memory_utilization: float 
     block_size: int = 16
+    max_num_batched_tokens: Optional[int] = None

@@ -11,6 +11,11 @@ from .kv_cache import PagedKVCacheManager
 def get_vllm_config(
     config: Config
 ):
+    max_num_batched_tokens = (
+        config.max_num_batched_tokens
+        if config.max_num_batched_tokens is not None
+        else 512
+    )
     model_config = ModelConfig(
         model=config.model_name,
         dtype="float16",
@@ -18,7 +23,7 @@ def get_vllm_config(
     )
     scheduler_config = SchedulerConfig(
         max_num_seqs=10,
-        max_num_batched_tokens=512,
+        max_num_batched_tokens=max_num_batched_tokens,
         max_model_len=512,
         is_encoder_decoder=model_config.is_encoder_decoder,
     )

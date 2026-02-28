@@ -49,7 +49,7 @@ class Engine:
             if not batch.req_ids:
                 await asyncio.sleep(0)
                 continue
-            batch_output = self.model_runner.execute_batch(batch)
+            batch_output: dict[str, list[int]] = self.model_runner.execute_batch(batch)
             generated_tokens, finished_requests = self.scheduler.process_output(batch_output)
             for req, tok in generated_tokens:
                 req.output_queue.put_nowait(self.tokenizer.decode(tok))
