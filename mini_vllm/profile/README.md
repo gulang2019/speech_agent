@@ -53,6 +53,28 @@ python3 -m mini_vllm.profile.repro --list_presets
 
 The exact `vllm` revision matters here. This repo currently pins `3rdparty/vllm` at commit `e1cd7a5faffd188cd204f7b54eea6cb35f787ee9` (`v0.14.0rc0-273-ge1cd7a5fa`), and the install script below installs that exact checkout instead of pulling an arbitrary wheel from PyPI.
 
+If you are starting from GitHub on another machine, pull the branch that contains this flow first.
+
+Fresh clone:
+
+```bash
+git clone --recurse-submodules git@github.com:gulang2019/speech_agent.git
+cd speech_agent
+git fetch origin
+git switch profile-repro-packaging
+git pull --ff-only origin profile-repro-packaging
+git submodule update --init --recursive
+```
+
+Existing checkout:
+
+```bash
+git fetch origin
+git switch profile-repro-packaging
+git pull --ff-only origin profile-repro-packaging
+git submodule update --init --recursive
+```
+
 One-command install + profile flow:
 
 ```bash
