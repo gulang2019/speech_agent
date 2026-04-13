@@ -129,6 +129,10 @@ def _extract_forwarded_value(forwarded_args: list[str], flag: str) -> Optional[s
     return None
 
 
+def _has_forwarded_flag(forwarded_args: list[str], flag: str) -> bool:
+    return any(arg == flag or arg.startswith(flag + "=") for arg in forwarded_args)
+
+
 def _safe_int(value: Optional[str], default: Optional[int]) -> Optional[int]:
     if value is None:
         return default
@@ -398,6 +402,8 @@ def _run_preset(
     _copy_batch_config(preset, config_copy_path)
 
     profile_args = list(forwarded_args)
+    if not plot_only and not _has_forwarded_flag(profile_args, "--continue_on_error"):
+        profile_args.append("--continue_on_error")
     if plot_only:
         if not output_path.exists():
             raise FileNotFoundError(

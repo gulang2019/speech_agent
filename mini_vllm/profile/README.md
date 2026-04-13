@@ -18,6 +18,9 @@ By default this runs both packaged presets:
 - `prefill_single_decode_sweep`: writes `prefill_single_decode_sweep_energy_per_token_vs_batch_tokens.png`
 - `prefill_decode_only`: writes `profile_plot_power_vs_concurrency.png`
 
+The packaged repro wrapper also enables `--continue_on_error` by default, so oversized
+or OOM batches are recorded as errors and skipped instead of aborting the whole run.
+
 Each preset gets its own subdirectory under `--output_dir` with:
 - the copied `batch_config.json` used for that run
 - the measured `*.jsonl`
