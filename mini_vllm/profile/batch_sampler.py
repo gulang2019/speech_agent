@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import math
 import os
+from copy import deepcopy
 from typing import Iterable, Optional
 
 from mini_vllm.struct import Batch
@@ -43,10 +44,10 @@ class BatchSampler:
     def build_batches(self, specs: Iterable[BatchSpec]) -> list[Batch]:
         batches = []
         for spec in specs:
-            batches.append(self._build_batch(spec))
+            batches.append(self.build_batch(spec))
         return batches
 
-    def _build_batch(self, spec: BatchSpec) -> Batch:
+    def build_batch(self, spec: BatchSpec) -> Batch:
         block_cursor = 0
         req_ids = []
         input_ids = []
@@ -71,9 +72,13 @@ class BatchSampler:
                 block_ids = req.block_ids[:needed_blocks]
             else:
                 if block_cursor + needed_blocks > self.num_blocks:
+                    missing_blocks = block_cursor + needed_blocks - self.num_blocks
                     raise ValueError(
-                        f"not enough blocks for batch {spec.name}: "
-                        f"need {block_cursor + needed_blocks}, have {self.num_blocks}"
+                        f"not enough KV-cache blocks for batch {spec.name}: "
+                        f"need {block_cursor + needed_blocks}, have {self.num_blocks} "
+                        f"(missing {missing_blocks}, block_size={self.block_size}). "
+                        "Reduce batch concurrency/context length or increase "
+                        "--max_memory_utilization."
                     )
                 block_ids = list(range(block_cursor, block_cursor + needed_blocks))
                 block_cursor += needed_blocks
@@ -97,7 +102,16 @@ class BatchSampler:
         for item in raw:
             name = str(item.get("name", "batch"))
             batch_type = str(item.get("type", "mixed"))
-            requests_raw = item.get("requests", [])
+            requests_raw = item.get("requests")
+            if requests_raw is None:
+                request_template = item.get("request_template")
+                num_reqs = int(item.get("num_reqs", 0))
+                if request_template is None or num_reqs <= 0:
+                    raise ValueError(
+                        f"batch spec {name} must define either requests or "
+                        "request_template + num_reqs"
+                    )
+                requests_raw = [deepcopy(request_template) for _ in range(num_reqs)]
             requests: list[RequestSpec] = []
             for r in requests_raw:
                 requests.append(

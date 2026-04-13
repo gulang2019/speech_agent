@@ -132,21 +132,35 @@ class ProfileModeler:
     def plot(self, records: Iterable[dict[str, object]], output_prefix: str) -> None:
         import matplotlib.pyplot as plt
 
+        plt.rcParams.update(
+            {
+                "font.size": 18,
+                "axes.titlesize": 26,
+                "axes.labelsize": 22,
+                "xtick.labelsize": 18,
+                "ytick.labelsize": 18,
+                "legend.fontsize": 18,
+                "lines.linewidth": 3.2,
+                "axes.linewidth": 1.2,
+            }
+        )
+
+        rows = list(records)
         by_type: dict[str, list[dict[str, object]]] = {}
-        for row in records:
+        for row in rows:
             if row.get("record_type") != "batch":
                 continue
             batch_type = str(row.get("batch_type", "unknown"))
             by_type.setdefault(batch_type, []).append(row)
 
         if self.model_type == "max_affine":
-            for batch_type, rows in by_type.items():
-                x, kept_rows = self._build_feature_matrix(rows)
+            for batch_type, type_rows in by_type.items():
+                x, kept_rows = self._build_feature_matrix(type_rows)
                 latency = np.array([float(r.get("latency_ms", 0.0)) for r in kept_rows])
                 energy = np.array([float(r.get("energy_j", 0.0)) for r in kept_rows])
                 power = np.array([float(r.get("avg_power_w", 0.0)) for r in kept_rows])
 
-                models = self.fit_models(rows)
+                models = self.fit_models(type_rows)
                 latency_pred = self._predict_max_affine(
                     x, models[batch_type]["latency_ms"].components
                 )
@@ -157,35 +171,48 @@ class ProfileModeler:
                     x, models[batch_type]["avg_power_w"].components
                 )
 
-                fig, ax = plt.subplots(1, 3, figsize=(14, 4))
+                fig, ax = plt.subplots(1, 3, figsize=(18.5, 6.4))
                 self._plot_pred_vs_actual(ax[0], latency, latency_pred, "latency (ms)")
                 self._plot_pred_vs_actual(ax[1], energy, energy_pred, "energy (J)")
                 self._plot_pred_vs_actual(ax[2], power, power_pred, "avg power (W)")
 
                 fig.tight_layout()
-                fig.savefig(f"{output_prefix}_{batch_type}_max_affine.png", dpi=200)
+                fig.savefig(
+                    f"{output_prefix}_{batch_type}_max_affine.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
                 plt.close(fig)
+            self._plot_power_vs_concurrency(rows, output_prefix, plt)
+            self._plot_energy_per_request_vs_concurrency(rows, output_prefix, plt)
+            self._plot_energy_per_token_vs_batch_tokens(rows, output_prefix, plt)
             return
 
-        for batch_type, rows in by_type.items():
-            x = np.array([float(r.get("total_tokens", 0)) for r in rows])
-            latency = np.array([float(r.get("latency_ms", 0.0)) for r in rows])
-            energy = np.array([float(r.get("energy_j", 0.0)) for r in rows])
+        for batch_type, type_rows in by_type.items():
+            x = np.array([float(r.get("total_tokens", 0)) for r in type_rows])
+            latency = np.array([float(r.get("latency_ms", 0.0)) for r in type_rows])
+            energy = np.array([float(r.get("energy_j", 0.0)) for r in type_rows])
 
-            fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-            ax[0].scatter(x, latency, s=16)
-            ax[0].set_title(f"{batch_type} latency")
-            ax[0].set_xlabel("total tokens")
-            ax[0].set_ylabel("latency (ms)")
+            fig, ax = plt.subplots(1, 2, figsize=(14.5, 5.8))
+            ax[0].scatter(x, latency, s=56)
+            ax[0].set_title(f"{batch_type} latency", fontsize=24)
+            ax[0].set_xlabel("total tokens", fontsize=20)
+            ax[0].set_ylabel("latency (ms)", fontsize=20)
+            ax[0].tick_params(axis="both", labelsize=16)
 
-            ax[1].scatter(x, energy, s=16)
-            ax[1].set_title(f"{batch_type} energy")
-            ax[1].set_xlabel("total tokens")
-            ax[1].set_ylabel("energy (J)")
+            ax[1].scatter(x, energy, s=56)
+            ax[1].set_title(f"{batch_type} energy", fontsize=24)
+            ax[1].set_xlabel("total tokens", fontsize=20)
+            ax[1].set_ylabel("energy (J)", fontsize=20)
+            ax[1].tick_params(axis="both", labelsize=16)
 
             fig.tight_layout()
-            fig.savefig(f"{output_prefix}_{batch_type}.png", dpi=200)
+            fig.savefig(f"{output_prefix}_{batch_type}.png", dpi=300, bbox_inches="tight")
             plt.close(fig)
+
+        self._plot_power_vs_concurrency(rows, output_prefix, plt)
+        self._plot_energy_per_request_vs_concurrency(rows, output_prefix, plt)
+        self._plot_energy_per_token_vs_batch_tokens(rows, output_prefix, plt)
 
     def _fit_linear(self, x: np.ndarray, y: np.ndarray) -> LinearModel:
         if len(x) < 2:
@@ -304,13 +331,230 @@ class ProfileModeler:
     def _plot_pred_vs_actual(
         self, ax, y_true: np.ndarray, y_pred: np.ndarray, label: str
     ) -> None:
-        ax.scatter(y_true, y_pred, s=16)
+        ax.scatter(y_true, y_pred, s=56)
         if len(y_true) >= 2:
             min_v = min(y_true.min(), y_pred.min())
             max_v = max(y_true.max(), y_pred.max())
-            ax.plot([min_v, max_v], [min_v, max_v], color="tab:red")
-        ax.set_xlabel(f"actual {label}")
-        ax.set_ylabel(f"pred {label}")
+            ax.plot([min_v, max_v], [min_v, max_v], color="tab:red", linewidth=2.4)
+        ax.set_xlabel(f"actual {label}", fontsize=18)
+        ax.set_ylabel(f"pred {label}", fontsize=18)
+        ax.tick_params(axis="both", labelsize=15)
+
+    def _collect_concurrency_rows(self, records, value_getter):
+        rows_by_type: dict[str, list[tuple[int, float]]] = {}
+        idle_power_w: Optional[float] = None
+        for row in records:
+            if row.get("record_type") == "idle":
+                if idle_power_w is None:
+                    try:
+                        idle_power_w = float(row.get("idle_avg_power_w", 0.0))
+                    except (TypeError, ValueError):
+                        idle_power_w = None
+                continue
+            if row.get("record_type") != "batch":
+                continue
+            batch_type = str(row.get("batch_type", "unknown"))
+            if batch_type not in ("prefill", "decode"):
+                continue
+            try:
+                num_reqs = int(row.get("num_reqs", row.get("num_requests", 0)))
+                if num_reqs <= 0:
+                    continue
+                value = value_getter(row, num_reqs)
+            except (TypeError, ValueError):
+                continue
+            if value is None:
+                continue
+            rows_by_type.setdefault(batch_type, []).append((num_reqs, float(value)))
+
+        return rows_by_type, idle_power_w
+
+    def _collect_batch_token_rows(self, records, value_getter):
+        rows_by_type: dict[str, list[tuple[int, float]]] = {}
+        for row in records:
+            if row.get("record_type") != "batch":
+                continue
+            batch_type = str(row.get("batch_type", "unknown"))
+            if batch_type not in ("prefill", "decode"):
+                continue
+            try:
+                batch_tokens = int(row.get("total_query_tokens", row.get("total_query_len", 0)))
+                if batch_tokens <= 0:
+                    continue
+                value = value_getter(row, batch_tokens)
+            except (TypeError, ValueError):
+                continue
+            if value is None:
+                continue
+            rows_by_type.setdefault(batch_type, []).append((batch_tokens, float(value)))
+        return rows_by_type
+
+    def _plot_concurrency_metric(
+        self,
+        rows_by_type: dict[str, list[tuple[int, float]]],
+        output_path: str,
+        ylabel: str,
+        plt,
+        xlabel: str = "Concurrency (requests)",
+        legend_fontsize: int = 16,
+        vertical_xtick_threshold: Optional[int] = None,
+        vertical_xtick_y: Optional[float] = None,
+        x_tick_pad: int = 4,
+        idle_value: Optional[float] = None,
+        idle_annotation: Optional[str] = None,
+    ) -> None:
+        plot_types = [
+            batch_type for batch_type in ("prefill", "decode") if rows_by_type.get(batch_type)
+        ]
+        if not plot_types:
+            return
+
+        colors = {"prefill": "#1f77b4", "decode": "#d95f02"}
+        markers = {"prefill": "o", "decode": "s"}
+        fig, ax = plt.subplots(1, 1, figsize=(8.6, 5.2))
+        xticks = {0} if idle_value is not None else set()
+
+        for batch_type in plot_types:
+            pairs = rows_by_type[batch_type]
+            x = np.array([pair[0] for pair in pairs], dtype=int)
+            y = np.array([pair[1] for pair in pairs], dtype=float)
+            color = colors[batch_type]
+            marker = markers[batch_type]
+
+            unique_x = np.array(sorted(set(x.tolist())), dtype=int)
+            mean_y = np.array([y[x == value].mean() for value in unique_x], dtype=float)
+            std_y = np.array(
+                [
+                    y[x == value].std(ddof=1) if np.count_nonzero(x == value) > 1 else 0.0
+                    for value in unique_x
+                ],
+                dtype=float,
+            )
+            ax.errorbar(
+                unique_x,
+                mean_y,
+                yerr=std_y,
+                color=color,
+                marker=marker,
+                markersize=10,
+                markerfacecolor="white",
+                markeredgewidth=2.2,
+                linewidth=2.8,
+                elinewidth=2.0,
+                capsize=5,
+                capthick=1.8,
+                zorder=3,
+                label=f"{batch_type} mean ±1σ",
+            )
+            xticks.update(unique_x.tolist())
+
+        if idle_value is not None:
+            ax.axhline(
+                idle_value,
+                color="black",
+                linestyle="--",
+                linewidth=1.4,
+                alpha=0.6,
+                zorder=1,
+            )
+            ax.scatter(
+                [0],
+                [idle_value],
+                marker="*",
+                s=250,
+                color="black",
+                zorder=4,
+                label="idle",
+            )
+            if idle_annotation:
+                ax.annotate(
+                    idle_annotation,
+                    xy=(0, idle_value),
+                    xytext=(12, 10),
+                    textcoords="offset points",
+                    fontsize=14,
+                    color="black",
+                    bbox={
+                        "boxstyle": "round,pad=0.2",
+                        "facecolor": "white",
+                        "edgecolor": "none",
+                        "alpha": 0.85,
+                    },
+                )
+
+        ax.set_xlabel(xlabel, fontsize=20)
+        ax.set_ylabel(ylabel, fontsize=20)
+        ax.set_xscale("symlog", linthresh=1, base=2)
+        ax.set_ylim(bottom=0)
+        xtick_values = sorted(xticks)
+        ax.set_xticks(xtick_values)
+        ax.set_xticklabels([str(value) for value in xtick_values])
+        if vertical_xtick_threshold is not None:
+            for tick_value, tick_label in zip(xtick_values, ax.get_xticklabels()):
+                if tick_value >= vertical_xtick_threshold:
+                    tick_label.set_rotation(90)
+                    tick_label.set_ha("center")
+                    tick_label.set_va("top")
+                    tick_label.set_rotation_mode("anchor")
+                    if vertical_xtick_y is not None:
+                        tick_label.set_y(vertical_xtick_y)
+        ax.tick_params(axis="x", labelsize=17, pad=x_tick_pad)
+        ax.tick_params(axis="y", labelsize=17)
+        ax.grid(True, alpha=0.25, linewidth=0.9)
+        ax.legend(fontsize=legend_fontsize, frameon=True, loc="best")
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    def _plot_power_vs_concurrency(self, records, output_prefix: str, plt) -> None:
+        rows_by_type, idle_power_w = self._collect_concurrency_rows(
+            records,
+            lambda row, _num_reqs: row.get("avg_power_w", 0.0),
+        )
+        self._plot_concurrency_metric(
+            rows_by_type=rows_by_type,
+            output_path=f"{output_prefix}_power_vs_concurrency.png",
+            ylabel="Average Power (W)",
+            plt=plt,
+            xlabel="Concurrency (requests)",
+            legend_fontsize=16,
+            x_tick_pad=4,
+            idle_value=idle_power_w,
+            idle_annotation=f"idle {idle_power_w:.1f} W" if idle_power_w is not None else None,
+        )
+
+    def _plot_energy_per_request_vs_concurrency(self, records, output_prefix: str, plt) -> None:
+        rows_by_type, _idle_power_w = self._collect_concurrency_rows(
+            records,
+            lambda row, num_reqs: float(row.get("energy_j", 0.0)) / num_reqs,
+        )
+        self._plot_concurrency_metric(
+            rows_by_type=rows_by_type,
+            output_path=f"{output_prefix}_energy_per_request_vs_concurrency.png",
+            ylabel="Energy / Request (J)",
+            plt=plt,
+            xlabel="Concurrency (requests)",
+            legend_fontsize=16,
+            x_tick_pad=4,
+        )
+
+    def _plot_energy_per_token_vs_batch_tokens(self, records, output_prefix: str, plt) -> None:
+        rows_by_type = self._collect_batch_token_rows(
+            records,
+            lambda row, batch_tokens: float(row.get("energy_j", 0.0)) / batch_tokens,
+        )
+        self._plot_concurrency_metric(
+            rows_by_type=rows_by_type,
+            output_path=f"{output_prefix}_energy_per_token_vs_batch_tokens.png",
+            ylabel="Energy / Token (J)",
+            plt=plt,
+            xlabel="Batch Size (#Token)",
+            legend_fontsize=18,
+            vertical_xtick_threshold=1024,
+            vertical_xtick_y=-0.035,
+            x_tick_pad=8,
+        )
 
     def _load_jsonl(self, path: str) -> list[dict[str, object]]:
         rows = []
