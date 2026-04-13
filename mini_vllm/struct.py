@@ -83,3 +83,7 @@ class Config:
     max_memory_utilization: float 
     block_size: int = 16
     max_num_batched_tokens: Optional[int] = None
+    enforce_eager: bool = False
+    compilation_mode: Optional[str] = None
+    compilation_backend: str = ""
+    cudagraph_mode: Optional[str] = None

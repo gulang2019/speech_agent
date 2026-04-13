@@ -5,7 +5,11 @@ import numpy as np
 from typing import cast, Any
 import logging
 
+from ._bootstrap import bootstrap_vllm_import_env
+
 logger = logging.getLogger(__name__)
+
+bootstrap_vllm_import_env()
 
 
 from itertools import accumulate
