@@ -60,16 +60,36 @@ class ModelRunner:
         total_memory = props.total_memory
         used_memory = torch.cuda.device_memory_used(device = self.device)
         allowed_memory = total_memory * utilization
-        assert allowed_memory > used_memory, (
-            "no memory available for KV cache: "
-            f"allowed={allowed_memory / 1e9:.3f}GB "
-            f"(total={total_memory / 1e9:.3f}GB * utilization={utilization}), "
-            f"used={used_memory / 1e9:.3f}GB, "
-            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}. "
-            "Free memory on the selected GPU, choose a different --device_index, "
-            "or raise --max_memory_utilization."
-        )
-        return int(allowed_memory - used_memory) 
+        free_memory = total_memory - used_memory
+        if free_memory <= 0:
+            raise RuntimeError(
+                "no memory available for KV cache: "
+                f"allowed={allowed_memory / 1e9:.3f}GB "
+                f"(total={total_memory / 1e9:.3f}GB * utilization={utilization}), "
+                f"used={used_memory / 1e9:.3f}GB, "
+                f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}, "
+                f"resolved_gpu_id={os.environ.get('MINI_VLLM_PROFILE_NVIDIA_GPU_ID', '<unset>')}. "
+                "Free memory on the selected GPU, choose a different --device_index, "
+                "or raise --max_memory_utilization."
+            )
+
+        budgeted_available = allowed_memory - used_memory
+        if budgeted_available <= 0:
+            logger.warning(
+                "Model load already exceeds the gpu_memory_utilization budget; "
+                "falling back to remaining free memory for KV cache. "
+                "allowed=%.3fGB used=%.3fGB free=%.3fGB utilization=%.3f "
+                "CUDA_VISIBLE_DEVICES=%s resolved_gpu_id=%s",
+                allowed_memory / 1e9,
+                used_memory / 1e9,
+                free_memory / 1e9,
+                utilization,
+                os.environ.get("CUDA_VISIBLE_DEVICES", "<unset>"),
+                os.environ.get("MINI_VLLM_PROFILE_NVIDIA_GPU_ID", "<unset>"),
+            )
+            return int(free_memory)
+
+        return int(min(budgeted_available, free_memory))
         
     def _init_kv_cache(self):
 

@@ -253,6 +253,13 @@ def _parse_bool_env(name: str) -> Optional[bool]:
     return value == "1"
 
 
+def _resolved_gpu_selector_from_env() -> Optional[str]:
+    value = os.environ.get("MINI_VLLM_PROFILE_NVIDIA_GPU_ID")
+    if value in (None, ""):
+        return None
+    return value
+
+
 def _collect_vllm_source_spec_metadata() -> dict[str, object]:
     patch_path = VLLM_SOURCE.patch_path
     return {
@@ -295,7 +302,7 @@ def _collect_software_metadata() -> dict[str, object]:
     }
 
 
-def _collect_gpu_metadata(device_index: Optional[int]) -> dict[str, object]:
+def _collect_gpu_metadata(device_index: Optional[str]) -> dict[str, object]:
     nvidia_smi = shutil.which("nvidia-smi")
     if nvidia_smi is None:
         return {
@@ -460,7 +467,9 @@ def _run_preset(
             },
             "git": _collect_git_metadata(),
             "software": _collect_software_metadata(),
-            "gpu": _collect_gpu_metadata(_safe_int(device_index_str, 0)),
+            "gpu": _collect_gpu_metadata(
+                _resolved_gpu_selector_from_env() or device_index_str or "0"
+            ),
             "command": {
                 "wrapper_argv": sys.argv[1:],
                 "forwarded_cli_args": forwarded_args,

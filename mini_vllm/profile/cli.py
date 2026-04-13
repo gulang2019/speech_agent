@@ -152,10 +152,28 @@ def _estimate_max_query_tokens(batch_config_path: str) -> Optional[int]:
     return max_tokens if max_tokens > 0 else None
 
 
-def _configure_cuda_device(device_index: int) -> None:
+def _configure_cuda_device(device_index: int) -> str:
     # Keep GPU selection consistent between torch/vLLM and nvidia-smi sampling.
     os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(device_index)
+    raw_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if raw_visible_devices:
+        visible_tokens = [
+            token.strip()
+            for token in raw_visible_devices.split(",")
+            if token.strip()
+        ]
+        if device_index < 0 or device_index >= len(visible_tokens):
+            raise ValueError(
+                "--device_index is out of range for the current CUDA_VISIBLE_DEVICES "
+                f"mapping ({raw_visible_devices!r})"
+            )
+        resolved_gpu_id = visible_tokens[device_index]
+    else:
+        resolved_gpu_id = str(device_index)
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = resolved_gpu_id
+    os.environ["MINI_VLLM_PROFILE_NVIDIA_GPU_ID"] = resolved_gpu_id
+    return resolved_gpu_id
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -167,7 +185,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.batch_config:
         raise ValueError("--batch_config is required unless --plot_only is set")
 
-    _configure_cuda_device(args.device_index)
+    resolved_gpu_id = _configure_cuda_device(args.device_index)
 
     from mini_vllm.profile.batch_sampler import BatchSampler
     from mini_vllm.profile.energy_meter import EnergyMeter, GpuFrequencyController
@@ -209,7 +227,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
 
     energy_meter = EnergyMeter(
-        device_index=args.device_index,
+        device_index=resolved_gpu_id,
         sample_interval_s=args.sample_interval_s,
     )
 
@@ -227,7 +245,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     freq_ctrl = None
     try:
         if args.graphics_clock or args.power_limit_w is not None:
-            freq_ctrl = GpuFrequencyController(device_index=args.device_index)
+            freq_ctrl = GpuFrequencyController(device_index=resolved_gpu_id)
             if args.power_limit_w is not None:
                 freq_ctrl.set_power_limit(args.power_limit_w)
             if args.graphics_clock:

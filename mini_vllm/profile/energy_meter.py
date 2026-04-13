@@ -17,7 +17,7 @@ class PowerSample:
 
 
 class EnergyMeter:
-    def __init__(self, device_index: int = 0, sample_interval_s: float = 0.01):
+    def __init__(self, device_index: int | str = 0, sample_interval_s: float = 0.01):
         self.device_index = device_index
         self.sample_interval_s = sample_interval_s
         self._samples: list[PowerSample] = []
@@ -83,11 +83,20 @@ class EnergyMeter:
         except Exception:
             return False
 
+    def _nvml_handle(self):
+        import pynvml  # type: ignore
+
+        try:
+            return pynvml.nvmlDeviceGetHandleByIndex(int(self.device_index))
+        except (TypeError, ValueError):
+            device_id = str(self.device_index).encode("utf-8")
+            return pynvml.nvmlDeviceGetHandleByUUID(device_id)
+
     def _read_power_nvml(self, t: float) -> Optional[PowerSample]:
         try:
             import pynvml  # type: ignore
 
-            handle = pynvml.nvmlDeviceGetHandleByIndex(self.device_index)
+            handle = self._nvml_handle()
             power_mw = pynvml.nvmlDeviceGetPowerUsage(handle)
             power_w = power_mw / 1000.0
             graphics_clock = None
@@ -139,7 +148,7 @@ class EnergyMeter:
 
 
 class GpuFrequencyController:
-    def __init__(self, device_index: int = 0):
+    def __init__(self, device_index: int | str = 0):
         self.device_index = device_index
         self._nvidia_smi = shutil.which("nvidia-smi")
         if self._nvidia_smi is None:
