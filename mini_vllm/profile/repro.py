@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
+import os
 from pathlib import Path
 import platform
 import shlex
@@ -14,6 +15,8 @@ import socket
 import subprocess
 import sys
 from typing import Optional
+
+from mini_vllm.profile.vllm_source import VLLM_SOURCE
 
 @dataclass(frozen=True)
 class ProfilePreset:
@@ -153,21 +156,27 @@ def _run_command(command: list[str]) -> Optional[str]:
     return output or None
 
 
-def _collect_submodule_git_metadata(submodule_path: Path) -> dict[str, object]:
-    if not submodule_path.exists():
+def _collect_git_checkout_metadata(checkout_path: Optional[Path]) -> dict[str, object]:
+    if checkout_path is None:
         return {
-            "path": str(submodule_path),
+            "path": None,
             "present": False,
         }
 
-    commit = _run_command(["git", "-C", str(submodule_path), "rev-parse", "HEAD"])
+    if not checkout_path.exists():
+        return {
+            "path": str(checkout_path),
+            "present": False,
+        }
+
+    commit = _run_command(["git", "-C", str(checkout_path), "rev-parse", "HEAD"])
     describe = _run_command(
-        ["git", "-C", str(submodule_path), "describe", "--tags", "--always", "--dirty"]
+        ["git", "-C", str(checkout_path), "describe", "--tags", "--always", "--dirty"]
     )
     dirty = None
     try:
         completed = subprocess.run(
-            ["git", "-C", str(submodule_path), "status", "--short"],
+            ["git", "-C", str(checkout_path), "status", "--short"],
             check=True,
             capture_output=True,
             text=True,
@@ -177,7 +186,7 @@ def _collect_submodule_git_metadata(submodule_path: Path) -> dict[str, object]:
         dirty = None
 
     return {
-        "path": str(submodule_path.resolve()),
+        "path": str(checkout_path.resolve()),
         "present": True,
         "commit": commit,
         "describe": describe,
@@ -237,11 +246,46 @@ def _collect_git_metadata() -> dict[str, object]:
     }
 
 
+def _parse_bool_env(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    return value == "1"
+
+
+def _collect_vllm_source_spec_metadata() -> dict[str, object]:
+    patch_path = VLLM_SOURCE.patch_path
+    return {
+        "repo_url": VLLM_SOURCE.repo_url,
+        "commit": VLLM_SOURCE.commit,
+        "managed_checkout_dirname": VLLM_SOURCE.managed_checkout_dirname,
+        "patch": {
+            "path": str(patch_path.resolve()),
+            "present": patch_path.exists(),
+            "nonempty": VLLM_SOURCE.patch_is_nonempty,
+            "sha256": VLLM_SOURCE.patch_sha256,
+        },
+    }
+
+
 def _collect_software_metadata() -> dict[str, object]:
-    vllm_submodule_path = _REPO_ROOT / "3rdparty" / "vllm"
+    managed_vllm_checkout = os.environ.get("MINI_VLLM_PROFILE_VLLM_SRC")
+    repo_vllm_submodule = _REPO_ROOT / "3rdparty" / "vllm"
     return {
         "repo_root": str(_REPO_ROOT.resolve()),
-        "vllm_submodule": _collect_submodule_git_metadata(vllm_submodule_path),
+        "vllm_source_spec": _collect_vllm_source_spec_metadata(),
+        "vllm_checkout": _collect_git_checkout_metadata(
+            Path(managed_vllm_checkout) if managed_vllm_checkout else None
+        ),
+        "repo_vllm_submodule": _collect_git_checkout_metadata(repo_vllm_submodule),
+        "installer_environment": {
+            "vllm_src": managed_vllm_checkout,
+            "vllm_repo_url": os.environ.get("MINI_VLLM_PROFILE_VLLM_REPO_URL"),
+            "vllm_commit": os.environ.get("MINI_VLLM_PROFILE_VLLM_COMMIT"),
+            "vllm_patch_file": os.environ.get("MINI_VLLM_PROFILE_VLLM_PATCH_FILE"),
+            "vllm_patch_applied": _parse_bool_env("MINI_VLLM_PROFILE_VLLM_PATCH_APPLIED"),
+            "vllm_patch_sha256": os.environ.get("MINI_VLLM_PROFILE_VLLM_PATCH_SHA256") or None,
+        },
         "installed_python_packages": {
             "vllm": _collect_installed_distribution_metadata("vllm"),
             "numpy": _collect_installed_distribution_metadata("numpy"),

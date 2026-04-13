@@ -51,19 +51,18 @@ python3 -m mini_vllm.profile.repro --list_presets
 
 ## End-To-End On A New Machine
 
-The exact `vllm` revision matters here. This repo currently pins `3rdparty/vllm` at commit `e1cd7a5faffd188cd204f7b54eea6cb35f787ee9` (`v0.14.0rc0-273-ge1cd7a5fa`), and the install script below installs that exact checkout instead of pulling an arbitrary wheel from PyPI.
+The exact `vllm` revision matters here. The profiling flow now tracks that source explicitly in [vllm_source.py](/home/siyuanch/ssd/workspace/speech_agent/mini_vllm/profile/vllm_source.py) and [patches/vllm.patch](/home/siyuanch/ssd/workspace/speech_agent/mini_vllm/profile/patches/vllm.patch), so a plain GitHub clone can recreate the right checkout without relying on `git submodule update`. The currently pinned upstream commit is `e1cd7a5faffd188cd204f7b54eea6cb35f787ee9`.
 
 If you are starting from GitHub on another machine, pull the branch that contains this flow first.
 
 Fresh clone:
 
 ```bash
-git clone --recurse-submodules git@github.com:gulang2019/speech_agent.git
+git clone git@github.com:gulang2019/speech_agent.git
 cd speech_agent
 git fetch origin
 git switch profile-repro-packaging
 git pull --ff-only origin profile-repro-packaging
-git submodule update --init --recursive
 ```
 
 Existing checkout:
@@ -72,7 +71,6 @@ Existing checkout:
 git fetch origin
 git switch profile-repro-packaging
 git pull --ff-only origin profile-repro-packaging
-git submodule update --init --recursive
 ```
 
 One-command install + profile flow:
@@ -86,9 +84,12 @@ bash mini_vllm/profile/install_and_profile.sh -- \
 ```
 
 What it does:
-- initializes the pinned `3rdparty/vllm` submodule
+- clones `https://github.com/vllm-project/vllm.git` into a managed checkout under `.deps/`
+- checks out the pinned upstream commit from [vllm_source.py](/home/siyuanch/ssd/workspace/speech_agent/mini_vllm/profile/vllm_source.py)
+- applies [patches/vllm.patch](/home/siyuanch/ssd/workspace/speech_agent/mini_vllm/profile/patches/vllm.patch) if the tracked patch is non-empty
 - creates a local virtualenv at `.venvs/mini-vllm-profile`
-- installs the submodule with `pip install -e ./3rdparty/vllm`
+- verifies the virtualenv is using the pinned editable `vllm` source
+- installs the managed checkout with `pip install -e <managed_vllm_dir>`
 - installs plotting/runtime extras needed by the wrapper
 - runs `python -m mini_vllm.profile.repro ...`
 
@@ -103,7 +104,8 @@ bash mini_vllm/profile/install_and_profile.sh --skip-install -- \
 
 The resulting `run_metadata.json` records:
 - the top-level repo commit
-- the pinned `3rdparty/vllm` git commit and `git describe`
+- the pinned `vllm` repo URL, commit, patch path, and patch hash
+- the managed `vllm` checkout git metadata that was actually installed
 - the installed Python package version/location for `vllm`, `torch`, `numpy`, and `matplotlib`
 
 Current limitation:
