@@ -152,6 +152,12 @@ def _estimate_max_query_tokens(batch_config_path: str) -> Optional[int]:
     return max_tokens if max_tokens > 0 else None
 
 
+def _configure_cuda_device(device_index: int) -> None:
+    # Keep GPU selection consistent between torch/vLLM and nvidia-smi sampling.
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(device_index)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
     if args.plot_only:
@@ -160,6 +166,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         raise ValueError("--model_name is required unless --plot_only is set")
     if not args.batch_config:
         raise ValueError("--batch_config is required unless --plot_only is set")
+
+    _configure_cuda_device(args.device_index)
 
     from mini_vllm.profile.batch_sampler import BatchSampler
     from mini_vllm.profile.energy_meter import EnergyMeter, GpuFrequencyController

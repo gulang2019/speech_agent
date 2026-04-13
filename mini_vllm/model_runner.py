@@ -59,8 +59,17 @@ class ModelRunner:
         props = torch.cuda.get_device_properties(device = self.device)
         total_memory = props.total_memory
         used_memory = torch.cuda.device_memory_used(device = self.device)
-        assert total_memory * utilization > used_memory, f"no memory available, {total_memory}, {used_memory}"
-        return int(total_memory * utilization - used_memory) 
+        allowed_memory = total_memory * utilization
+        assert allowed_memory > used_memory, (
+            "no memory available for KV cache: "
+            f"allowed={allowed_memory / 1e9:.3f}GB "
+            f"(total={total_memory / 1e9:.3f}GB * utilization={utilization}), "
+            f"used={used_memory / 1e9:.3f}GB, "
+            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}. "
+            "Free memory on the selected GPU, choose a different --device_index, "
+            "or raise --max_memory_utilization."
+        )
+        return int(allowed_memory - used_memory) 
         
     def _init_kv_cache(self):
 
