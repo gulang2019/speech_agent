@@ -115,5 +115,77 @@
       "query_len": 1
     },
     "num_reqs": 128
+  },
+  {
+    "name": "decode_only_ctx2048_n1",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 1
+  },
+  {
+    "name": "decode_only_ctx2048_n2",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 2
+  },
+  {
+    "name": "decode_only_ctx2048_n4",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 4
+  },
+  {
+    "name": "decode_only_ctx2048_n8",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 8
+  },
+  {
+    "name": "decode_only_ctx2048_n16",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 16
+  },
+  {
+    "name": "decode_only_ctx2048_n32",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 32
+  },
+  {
+    "name": "decode_only_ctx2048_n64",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 64
+  },
+  {
+    "name": "decode_only_ctx2048_n128",
+    "type": "decode",
+    "request_template": {
+      "context_len": 2048,
+      "query_len": 1
+    },
+    "num_reqs": 128
   }
 ]
