@@ -1,3 +1,18 @@
+# Running profiling test
+
+```
+python ./tests/profiler.py
+```
+
+# Profiling logic
+
+The profiling model assumes that prefilling latency is a quadratic function to context length and the decoding latency (for each step) is linear to context length. All latencies is linear to batch size.
+
+# TODO
+
+Current profiling logic is simple and unable to adapt to more complex scenearios. For example some models do not display the expected latency trend as expected. Need to alter it to record a latency distribution, for example.
+
+
 # speech_agent
 
 ```
