@@ -4,6 +4,9 @@ import math
 import numpy as np
 from typing import cast, Any
 import logging
+import time
+import csv
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ class ModelRunner:
             vllm_config=vllm_config, model_config=vllm_config.model_config
         )
         from vllm.platforms import current_platform
+
         self.device = current_platform.device_type
         logger.info(f"loaded {vllm_config.model_config.model}, takes {torch.cuda.device_memory_used(device = self.device) / 1e9:.3f} Gb")
         self.block_size = vllm_config.cache_config.block_size
@@ -58,6 +62,7 @@ class ModelRunner:
         assert total_memory * utilization > used_memory, f"no memory available, {total_memory}, {used_memory}"
         return int(total_memory * utilization - used_memory) 
         
+    
     def _init_kv_cache(self):
 
         kv_cache_spec: dict[str, KVCacheSpec] = {}
@@ -151,7 +156,10 @@ class ModelRunner:
     def execute_batch(
         self, batch: Batch 
     ) -> BatchOutput:
+        #print(f"Batch shapes - input_ids: {len(batch.input_ids)}, query_lens: {batch.query_lens}, seq_lens: {batch.seq_lens}, context_lens: {batch.context_lens}")
         
+
+        start_time = time.time()
         attn_meta = self._build_attention_meta(batch)
         generated_tokens = {}
         with set_forward_context(attn_metadata=attn_meta, 
@@ -167,4 +175,26 @@ class ModelRunner:
         for idx, req_id in zip(accumulate(batch.query_lens), batch.req_ids):
             generated_tokens[req_id] = tokens[prev:idx]
             prev = idx
+        
+        end_time = time.time()
+        logger.info(f"Executed batch of {len(batch.req_ids)} requests in {end_time - start_time:.3f} seconds.")
+
+        # csv_file = f"batch_execution_log_{self.vllm_config.model_config.model}.csv"
+        # file_exists = os.path.isfile(csv_file)
+
+        # with open(csv_file, 'a', newline='') as f:
+        #     writer = csv.writer(f)
+        #     if not file_exists:
+        #         writer.writerow(['timestamp', 'num_requests', 'input_ids_len', 'query_lens', 'seq_lens', 'context_lens', 'block_idss', 'execution_time_s'])
+            
+        #     writer.writerow([
+        #         datetime.now().isoformat(),
+        #         len(batch.req_ids),
+        #         len(batch.input_ids),
+        #         batch.query_lens,
+        #         batch.seq_lens,
+        #         batch.context_lens,
+        #         batch.block_idss,
+        #         f"{end_time - start_time:.3f}"
+        #     ])
         return generated_tokens

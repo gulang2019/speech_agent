@@ -7,15 +7,11 @@ from .scheduler import Scheduler
 from .engine import Engine 
 from .model_runner import ModelRunner
 from .kv_cache import PagedKVCacheManager
+from vllm.config import set_current_vllm_config
 
 def get_vllm_config(
     config: Config
 ):
-    max_num_batched_tokens = (
-        config.max_num_batched_tokens
-        if config.max_num_batched_tokens is not None
-        else 512
-    )
     model_config = ModelConfig(
         model=config.model_name,
         dtype="float16",
@@ -23,7 +19,7 @@ def get_vllm_config(
     )
     scheduler_config = SchedulerConfig(
         max_num_seqs=10,
-        max_num_batched_tokens=max_num_batched_tokens,
+        max_num_batched_tokens=512,
         max_model_len=512,
         is_encoder_decoder=model_config.is_encoder_decoder,
     )
@@ -48,7 +44,12 @@ def get_engine_from_vllm(
 ):
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     vllm_config = get_vllm_config(config)
-    model_runner = ModelRunner(vllm_config)
+    # print("config:",config)
+    # print("vllm_config:",vllm_config)
+
+    #set_current_vllm_config(vllm_config)
+    with set_current_vllm_config(vllm_config):
+        model_runner = ModelRunner(vllm_config)
     
     memory_manager = PagedKVCacheManager(
         config.block_size,

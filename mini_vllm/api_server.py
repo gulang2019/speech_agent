@@ -84,4 +84,4 @@ if __name__ == "__main__":
     os.environ["MINI_VLLM_MAX_MEMORY_UTILIZATION"] = str(args.max_memory_utilization)
     import uvicorn
 
-    uvicorn.run("mini_vllm.api_server:app", host="0.0.0.0", port=8000)
+    uvicorn.run("mini_vllm.api_server:app", host="0.0.0.0", port=8964)
