@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "description": "Cross-model RoboCasa latency robustness benchmark, v1.",
+  "control_frequency_hz": 20.0,
+  "delay_domain": "sim",
+  "delay_domain_notes": {
+    "sim": "Injected delay is expressed in control steps, so staleness is identical across models regardless of native inference latency.",
+    "wall": "Legacy semantics: worker sleeps on top of real model latency, so total delay = model latency + injected delay."
+  },
+  "models": [
+    "xiaomi",
+    "gr00t_n1_5",
+    "pi0_5",
+    "diffusion_policy"
+  ],
+  "task_sets": {
+    "atomic_smoke": [
+      "PickPlaceCounterToCabinet",
+      "OpenDrawer"
+    ],
+    "atomic_screening": [
+      "PickPlaceCounterToCabinet",
+      "PickPlaceCounterToSink",
+      "PickPlaceCabinetToCounter",
+      "PickPlaceCounterToMicrowave",
+      "PickPlaceCounterToStove",
+      "OpenDrawer",
+      "TurnOffStove",
+      "CoffeeSetupMug"
+    ],
+    "atomic_final": [
+      "PickPlaceCounterToCabinet",
+      "PickPlaceCounterToSink",
+      "PickPlaceCabinetToCounter",
+      "PickPlaceCounterToMicrowave",
+      "TurnOffStove",
+      "CoffeeSetupMug"
+    ],
+    "composite_extension": [
+      "PrepareCoffee",
+      "MealPrepStaging",
+      "ArrangeBreadBasket",
+      "BeverageOrganization"
+    ]
+  },
+  "scene_sets": {
+    "legacy5": {
+      "description": "Xiaomi-compatible fixed scenes.",
+      "split": null,
+      "object_split": "pretrain",
+      "layout_and_style_ids": [[1, 1], [2, 2], [4, 4], [6, 9], [7, 10]]
+    },
+    "single_scene_L7S10": {
+      "description": "One fixed pretraining kitchen scene for the replan-step sweep.",
+      "split": null,
+      "object_split": "pretrain",
+      "layout_and_style_ids": [[7, 10]]
+    },
+    "pretrain20": {
+      "description": "Fixed pretraining-scene subset for paired cross-model evaluation.",
+      "split": null,
+      "object_split": "pretrain",
+      "layout_and_style_ids": [
+        [1, 1], [2, 2], [4, 4], [6, 9], [7, 10],
+        [11, 11], [12, 12], [13, 13], [14, 14], [15, 15],
+        [16, 16], [17, 17], [18, 18], [19, 19], [20, 20],
+        [21, 21], [22, 22], [23, 23], [24, 24], [25, 25]
+      ]
+    },
+    "countertostove_latency_signal5": {
+      "description": "Five CounterToStove scenes where the historical 0 ms versus 100 ms outcomes differed.",
+      "split": null,
+      "object_split": "pretrain",
+      "layout_and_style_ids": [[6, 9], [12, 12], [20, 20], [23, 23], [24, 24]]
+    },
+    "target10": {
+      "description": "The ten held-out target kitchen scenes.",
+      "split": null,
+      "object_split": "target",
+      "layout_and_style_ids": [
+        [1, 1], [2, 2], [3, 3], [4, 4], [5, 5],
+        [6, 6], [7, 7], [8, 8], [9, 9], [10, 10]
+      ]
+    }
+  },
+  "delay_sweeps_ms": {
+    "screening": [0, 100, 300, 500],
+    "final": [0, 50, 100, 200, 300, 500],
+    "normalized_total_latency_targets_ms": [200, 300, 400, 600, 800]
+  }
+}

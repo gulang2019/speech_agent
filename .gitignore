@@ -168,3 +168,15 @@ robocasa/scripts/taskgen/task_prompting/outputs/
 
 # Always ignore macOS junk
 **/.DS_Store
+
+# Local RoboCasa deployment
+.conda-env/
+.deps/
+.runtime/
+models/
+logs/
+robocasa/models/assets/README.md
+
+# Local benchmark outputs and notes
+eval_results/
+plan.md

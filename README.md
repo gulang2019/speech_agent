@@ -30,6 +30,19 @@ This guide contains information about installation and setup. Please refer to th
 
 -------
 ## Installation
+> **Local setup with Xiaomi-Robotics-1 evaluation and the cross-model
+> injected-delay / replan / RTC benchmark: see [INSTALL.md](INSTALL.md).**
+> Delays are injected in simulation steps by default (`--delay-domain sim`), so
+> the injected delay is the only source of staleness; pass `--delay-domain wall`
+> to reproduce the archived wall-clock results in
+> `eval_results/archive/legacy_wallclock_delay/`.
+
+This branch also contains the reproducible code for the Xiaomi-Robotics-1 / GR00T
+N1.5 latency benchmark. Model weights, local environments, kitchen assets, logs,
+and generated evaluation outputs are intentionally not tracked in Git. See
+[INSTALL.md](INSTALL.md) for the full machine setup and [the Stage 1 handoff](docs/stage1_xiaomi_gr00t_7task_heatmap.md)
+for the seven-task Slurm experiment.
+
 RoboCasa works across all major computing platforms. The easiest way to set up is through the [Anaconda](https://www.anaconda.com/) package management system. Follow the instructions below to install:
 1. Set up conda environment:
 
@@ -66,6 +79,62 @@ RoboCasa works across all major computing platforms. The easiest way to set up i
 
 -------
 ## Basic Usage
+
+### Delay benchmark quick start
+
+Run these commands from the repository root after installing the dependencies
+and downloading the required local checkpoints:
+
+```bash
+cd /path/to/robocasa
+.conda-env/bin/python scripts/validate_latency_manifest.py
+
+# One Xiaomi condition, locally
+.conda-env/bin/python scripts/xiaomi_latency_experiment.py \
+  --model-name xiaomi \
+  --task-name PickPlaceCounterToCabinet \
+  --scene-set legacy5 --object-split pretrain \
+  --delays-ms 0 --delay-domain sim \
+  --replan-steps-list 5 --rtc off --episodes 3 \
+  --output-dir eval_results/quickstart/xiaomi
+```
+
+For a GPU cluster, use the Slurm wrapper. Environment variables override the
+defaults in `slurm/xiaomi_latency_experiment.sbatch`:
+
+```bash
+MODEL_NAME=xiaomi \
+TASK_NAME=PickPlaceCounterToSink \
+SCENE_SET=pretrain20 OBJECT_SPLIT=pretrain \
+DELAYS_MS=0,100,300,500 DELAY_DOMAIN=sim \
+REPLAN_STEPS_LIST=1,2,3,4,5,6,8,10,12,15,20 \
+RTC=off CONTROL_FREQUENCY=20 EPISODES=3 \
+OUTPUT_DIR=eval_results/stage1/xiaomi/PickPlaceCounterToSink \
+  sbatch slurm/xiaomi_latency_experiment.sbatch
+```
+
+Set `MODEL_NAME=gr00t_n1_5` for the GR00T N1.5 adapter. Monitor and stop jobs
+with `squeue -u "$USER"` and `scancel JOB_ID`. The writer creates
+`episodes.csv/jsonl` and `summary.csv/json` incrementally; a complete 4-delay x
+11-replan x 3-episode run has 132 episode rows and 44 conditions.
+
+Plot a completed Xiaomi/GR00T task pair:
+
+```bash
+.conda-env/bin/python scripts/plot_stage1_delay_replan_heatmap.py \
+  --run Xiaomi eval_results/stage1/xiaomi/PickPlaceCounterToSink \
+  --run GR00T eval_results/stage1/gr00t_n1_5/PickPlaceCounterToSink \
+  --task PickPlaceCounterToSink --episodes-per-cell 3 \
+  --output eval_results/stage1/PickPlaceCounterToSink_xiaomi_gr00t.png
+```
+
+To inspect selected episodes as MP4, re-render a finished run:
+
+```bash
+.conda-env/bin/python scripts/replay_run_video.py \
+  --run eval_results/stage1/xiaomi/PickPlaceCounterToSink \
+  --out eval_results/stage1/videos/xiaomi --limit 2
+```
 
 ### Gym wrapper
 You can create environments using gym wrappers and run rollouts:
