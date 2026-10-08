@@ -17,6 +17,8 @@ def load_matrix(run_dir: Path, task: str):
     summary_files = [run_dir / "summary.csv"]
     if not summary_files[0].exists():
         summary_files = sorted(run_dir.glob("delay*/summary.csv"))
+    if not summary_files or not summary_files[0].exists():
+        summary_files = sorted(run_dir.rglob("summary.csv"))
     rows = []
     for summary_file in summary_files:
         with summary_file.open(newline="", encoding="utf-8") as file:

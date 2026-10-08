@@ -167,3 +167,44 @@ simulation usage, consult the upstream project:
 - https://robocasa.ai
 
 The benchmark-specific setup and model paths are documented in `INSTALL.md`.
+
+## RoboDojo `pour_liquid_into_cup` Xiaomi smoke
+
+The RoboDojo compatibility bridge and delay x replan smoke runner are included
+in this branch. The one-click entry point submits itself to the
+`gpu-scavenger` Slurm partition when run outside an allocation:
+
+```bash
+cd /fact_home/xunyuanliu/dev/robo
+bash scripts/robodojo_pour_liquid_one_click.sh
+```
+
+It reuses user-local checkouts, model weights, and caches when present. Missing
+RoboDojo/XPolicyLab checkouts, the Xiaomi RoboCasa checkpoint, RoboDojo assets,
+and the Ubuntu 24.04 rootfs are deployed under `.deps/`, `models/`, and
+`.runtime/`; no system driver, Singularity configuration, or physical GPU index
+is changed. Slurm remains responsible for GPU allocation and visibility.
+
+Before evaluation, the script verifies task metadata, GPU/Vulkan access, the
+Xiaomi WebSocket server, and a headless Isaac SimulationApp. Isaac runs in a
+user-local Ubuntu rootfs so the host glibc 2.34 limitation is avoided. Only
+after these checks pass does it run the default 9-cell smoke:
+
+```text
+delay_ms:       0, 100, 300
+replan_steps:  1, 5, 10
+episodes/cell: 1
+```
+
+Override the smoke size or paths without editing the repository:
+
+```bash
+EPISODES=4 DELAYS_MS=0,100,300 REPLAN_STEPS_LIST=1,5,10 \
+  MODEL_PATH=/path/to/xiaomi-robotics-1-robocasa \
+  bash scripts/robodojo_pour_liquid_one_click.sh
+```
+
+Logs and metrics are written to
+`eval_results/robodojo_xiaomi_delay_replan_oneclick/`. The compatibility
+contract, observation versioning, and action conversion are documented in
+`docs/robodojo_xiaomi.md`.

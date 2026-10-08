@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "benchmark": "RoboDojo",
+  "compatibility": "bridge",
+  "tasks": {
+    "pour_liquid_into_cup": {
+      "config": "pour_liquid_into_cup",
+      "env_cfg_type": "arx_x5",
+      "action_type": "ee",
+      "max_steps": 400,
+      "instruction": "Pour the liquid from the bottle into the cup.",
+      "observation_data_format_version": "v1.0",
+      "default_bridge": {
+        "active_arm": "right",
+        "action_mode": "delta_ee",
+        "delta_frame": "base",
+        "action_units": "robocasa_normalized",
+        "gripper_mode": "auto"
+      },
+      "policy_server": {
+        "entrypoint": "scripts/robodojo_xiaomi_server.py",
+        "eval_batch": false,
+        "protocol": "ws"
+      },
+      "notes": [
+        "The local RoboCasa Xiaomi checkpoint is single-arm robocasa_mg.",
+        "The configured active arm follows Xiaomi; the other RoboDojo arm is sent its current pose/gripper as a hold target.",
+        "This is not an official RoboDojo-trained checkpoint or leaderboard result."
+      ]
+    }
+  }
+}

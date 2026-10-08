@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Xiaomi PickPlaceCounterToCabinet: sim-domain delay x replan sweep.
+# PickPlaceCounterToCabinet: sim-domain delay x replan sweep.
 #
 # One array element is one (delay, replan) cell with 100 episodes. The %2
 # throttle intentionally limits this experiment to two GPUs at a time.
@@ -24,7 +24,8 @@ set -euo pipefail
 
 ROOT_DIR="${SLURM_SUBMIT_DIR:-/fact_home/xunyuanliu/dev/robo}"
 ENV_DIR="${ROOT_DIR}/.conda-env"
-ROOT_OUT="${ROOT_OUT:-eval_results/xiaomi_counter_to_cabinet_sim_replan_100ep}"
+MODEL_NAME="${MODEL_NAME:-xiaomi}"
+ROOT_OUT="${ROOT_OUT:-eval_results/${MODEL_NAME}_counter_to_cabinet_sim_replan_100ep}"
 TASK_NAME="PickPlaceCounterToCabinet"
 EPISODES="${EPISODES:-100}"
 
@@ -70,12 +71,13 @@ fi
 echo "Host: $(hostname)"
 echo "Array task: ${SLURM_ARRAY_TASK_ID}"
 echo "Condition: delay=${delay_ms}ms replan=${replan_steps}"
+echo "Model: ${MODEL_NAME}"
 echo "Delay semantics: sim-domain at 20 Hz; no wall-domain delay"
 echo "Output: ${OUTPUT_DIR}"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
 
 "${ENV_DIR}/bin/python" scripts/xiaomi_latency_experiment.py \
-    --model-name xiaomi \
+    --model-name "$MODEL_NAME" \
     --benchmark-manifest "${ROOT_DIR}/configs/latency_benchmark_v1.json" \
     --task-name "$TASK_NAME" \
     --scene-set pretrain20 \

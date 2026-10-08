@@ -123,15 +123,26 @@ class Condition:
     rtc: bool
     delay_steps: int = 0
     delay_domain: str = "sim"
+    delay_jitter_variance_ms2: float = 0.0
+    replan_jitter_variance_steps2: float = 0.0
+    delay_jitter_distribution: str = "symmetric"
+    replan_jitter_distribution: str = "symmetric"
+    delay_jitter_cv2: float = 0.0
+    replan_jitter_cv2: float = 0.0
 
     @property
     def name(self) -> str:
         rtc_name = "on" if self.rtc else "off"
+        jitter = ""
+        if self.delay_jitter_variance_ms2:
+            jitter += f"_delay{self.delay_jitter_distribution}var{self.delay_jitter_variance_ms2:g}ms2"
+        if self.replan_jitter_variance_steps2:
+            jitter += f"_replan{self.replan_jitter_distribution}var{self.replan_jitter_variance_steps2:g}steps2"
         if self.delay_domain == "wall":
-            return f"delay{self.delay_ms}ms_wall_replan{self.replan_steps}_rtc{rtc_name}"
+            return f"delay{self.delay_ms}ms_wall{jitter}_replan{self.replan_steps}_rtc{rtc_name}"
         return (
             f"delay{self.delay_ms}ms_d{self.delay_steps}steps"
-            f"_replan{self.replan_steps}_rtc{rtc_name}"
+            f"{jitter}_replan{self.replan_steps}_rtc{rtc_name}"
         )
 
 
@@ -140,6 +151,9 @@ class PendingInference:
     future: Future[tuple[np.ndarray, float, float]]
     requested_step: int
     available_step: int
+    delay_ms: float = 0.0
+    delay_steps: int = 0
+    replan_steps: int = 1
 
 
 @dataclass
@@ -167,14 +181,161 @@ class EpisodeResult:
     mean_total_inference_latency_ms: float
     mean_block_wait_ms: float
     wall_time_s: float
+    delay_jitter_variance_ms2: float = 0.0
+    replan_jitter_variance_steps2: float = 0.0
+    delay_sample_count: int = 0
+    mean_sampled_delay_ms: float = 0.0
+    sampled_delay_variance_ms2: float = 0.0
+    mean_sampled_delay_steps: float = 0.0
+    replan_sample_count: int = 0
+    mean_sampled_replan_steps: float = 0.0
+    sampled_replan_variance_steps2: float = 0.0
+    delay_jitter_distribution: str = "symmetric"
+    replan_jitter_distribution: str = "symmetric"
+    delay_jitter_cv2: float = 0.0
+    replan_jitter_cv2: float = 0.0
     error: str | None = None
 
 
-def delay_in_steps(delay_ms: int, control_frequency: float) -> int:
+def delay_in_steps(delay_ms: float, control_frequency: float) -> int:
     """Convert an injected delay in milliseconds to simulation control steps."""
     if delay_ms <= 0 or control_frequency <= 0:
         return 0
     return int(round(delay_ms * control_frequency / 1000.0))
+
+
+def sample_symmetric_jitter(
+    mean: float,
+    variance: float,
+    rng: np.random.Generator,
+    *,
+    integer: bool,
+) -> float | int:
+    """Sample a two-point distribution with exact target mean and variance.
+
+    A symmetric ``mean +/- sqrt(variance)`` distribution avoids clipping a
+    Gaussian at zero, which otherwise changes the requested mean. Replan
+    intervals must remain integral control steps.
+    """
+    if variance == 0:
+        return int(mean) if integer else float(mean)
+    deviation = math.sqrt(variance)
+    value = mean + (deviation if rng.integers(0, 2) else -deviation)
+    if value < 0:
+        raise ValueError(
+            f"jitter support must be non-negative; mean={mean}, variance={variance}"
+        )
+    if integer:
+        rounded = round(value)
+        if not math.isclose(value, rounded, abs_tol=1e-9):
+            raise ValueError(
+                f"integer jitter requires an integer standard deviation; variance={variance}"
+            )
+        if rounded < 1:
+            raise ValueError(
+                f"replan jitter support must be at least one step; got {rounded}"
+            )
+        return int(rounded)
+    return float(value)
+
+
+def sample_lower_bound_twopoint_jitter(
+    mean: float,
+    variance: float,
+    rng: np.random.Generator,
+    *,
+    lower_bound: float,
+    integer: bool,
+) -> float | int:
+    """Sample a lower-bounded two-point distribution with target moments.
+
+    Its support is ``{lower_bound, upper}``, where ``upper`` and its
+    probability are chosen to preserve the requested mean and variance. This
+    permits jitter variance greater than ``mean**2`` without negative delays.
+    """
+    if variance == 0:
+        return int(mean) if integer else float(mean)
+    if mean <= lower_bound:
+        raise ValueError(f"mean must exceed lower_bound: mean={mean}, lower={lower_bound}")
+    upper = mean + variance / (mean - lower_bound)
+    if integer:
+        rounded = round(upper)
+        if not math.isclose(upper, rounded, abs_tol=1e-9):
+            raise ValueError(
+                "integer lower-bound jitter requires an integer upper support; "
+                f"mean={mean}, variance={variance}, lower_bound={lower_bound}"
+            )
+        upper = float(rounded)
+    probability_upper = (mean - lower_bound) / (upper - lower_bound)
+    value = upper if rng.random() < probability_upper else lower_bound
+    return int(value) if integer else float(value)
+
+
+def sample_lognormal_jitter(
+    mean: float,
+    variance: float,
+    rng: np.random.Generator,
+    *,
+    integer: bool,
+) -> float | int:
+    """Sample a positive lognormal variable with requested moments."""
+    if variance == 0:
+        return int(mean) if integer else float(mean)
+    cv2 = variance / (mean * mean)
+    sigma2 = math.log1p(cv2)
+    mu = math.log(mean) - sigma2 / 2.0
+    value = float(rng.lognormal(mean=mu, sigma=math.sqrt(sigma2)))
+    return int(max(1, round(value))) if integer else value
+
+
+def sample_shifted_negative_binomial_jitter(
+    mean: float,
+    variance: float,
+    rng: np.random.Generator,
+    *,
+    lower_bound: int,
+    integer: bool,
+) -> float | int:
+    """Sample ``lower_bound + NB`` with requested positive-integer moments."""
+    if not integer:
+        raise ValueError("shifted negative-binomial jitter must be integer-valued")
+    if variance == 0:
+        return int(round(mean))
+    nb_mean = mean - lower_bound
+    if nb_mean <= 0:
+        raise ValueError(f"mean must exceed lower_bound: mean={mean}, lower={lower_bound}")
+    if variance <= nb_mean:
+        raise ValueError(
+            "shifted negative-binomial variance must exceed its NB mean; "
+            f"variance={variance}, mean={nb_mean}"
+        )
+    r = nb_mean * nb_mean / (variance - nb_mean)
+    p = r / (r + nb_mean)
+    return int(lower_bound + rng.negative_binomial(r, p))
+
+
+def sample_jitter(
+    mean: float,
+    variance: float,
+    rng: np.random.Generator,
+    *,
+    distribution: str,
+    lower_bound: float,
+    integer: bool,
+) -> float | int:
+    if distribution == "symmetric":
+        return sample_symmetric_jitter(mean, variance, rng, integer=integer)
+    if distribution == "lower_bound_twopoint":
+        return sample_lower_bound_twopoint_jitter(
+            mean, variance, rng, lower_bound=lower_bound, integer=integer
+        )
+    if distribution == "lognormal":
+        return sample_lognormal_jitter(mean, variance, rng, integer=integer)
+    if distribution == "shifted_negative_binomial":
+        return sample_shifted_negative_binomial_jitter(
+            mean, variance, rng, lower_bound=int(lower_bound), integer=integer
+        )
+    raise ValueError(f"unknown jitter distribution: {distribution}")
 
 
 class PolicyClient:
@@ -599,6 +760,14 @@ def condition_from_row(row: dict[str, Any], control_frequency: float) -> Conditi
         rtc=str(row["rtc"]) in {"True", "true"},
         delay_steps=int(row.get("delay_steps") or delay_in_steps(delay_ms, control_frequency)),
         delay_domain=row.get("delay_domain") or "sim",
+        delay_jitter_variance_ms2=float(row.get("delay_jitter_variance_ms2") or 0.0),
+        replan_jitter_variance_steps2=float(
+            row.get("replan_jitter_variance_steps2") or 0.0
+        ),
+        delay_jitter_cv2=float(row.get("delay_jitter_cv2") or 0.0),
+        replan_jitter_cv2=float(row.get("replan_jitter_cv2") or 0.0),
+        delay_jitter_distribution=row.get("delay_jitter_distribution") or "symmetric",
+        replan_jitter_distribution=row.get("replan_jitter_distribution") or "symmetric",
     )
 
 
@@ -703,6 +872,9 @@ def run_episode(
     model_latencies: list[float] = []
     total_latencies: list[float] = []
     block_waits_ms: list[float] = []
+    sampled_delays_ms: list[float] = []
+    sampled_delay_steps: list[int] = []
+    sampled_replans: list[int] = []
     try:
         from robocasa.utils.env_utils import create_env
 
@@ -760,6 +932,32 @@ def run_episode(
         observation = render_observation(
             env, args.image_size, args.crop_ratio, instruction
         )
+        jitter_rng = np.random.default_rng(
+            np.random.SeedSequence([args.jitter_seed, seed, episode])
+        )
+
+        def sample_delay() -> tuple[float, int]:
+            delay_ms = sample_jitter(
+                condition.delay_ms,
+                condition.delay_jitter_variance_ms2,
+                jitter_rng,
+                distribution=condition.delay_jitter_distribution,
+                lower_bound=0.0,
+                integer=False,
+            )
+            return float(delay_ms), delay_in_steps(delay_ms, args.delay_step_frequency_resolved)
+
+        def sample_replan() -> int:
+            return int(
+                sample_jitter(
+                    condition.replan_steps,
+                    condition.replan_jitter_variance_steps2,
+                    jitter_rng,
+                    distribution=condition.replan_jitter_distribution,
+                    lower_bound=1.0,
+                    integer=True,
+                )
+            )
 
         executor = ThreadPoolExecutor(max_workers=1)
         initial_future = executor.submit(
@@ -792,7 +990,10 @@ def run_episode(
         # Keep the fallback action at the model's native width so a slow model
         # cannot silently drop its base/control channels on a starving step.
         last_action = np.zeros(np.asarray(chunk).shape[-1], dtype=np.float32)
-        next_request_step = condition.replan_steps
+        # The initial prediction is synchronously available before simulation
+        # starts. Jitter affects only subsequent asynchronous requests.
+        next_request_step = sample_replan()
+        sampled_replans.append(next_request_step)
         success = False
         steps = 0
         next_tick = time.perf_counter()
@@ -830,7 +1031,7 @@ def run_episode(
                 steps,
                 plan,
                 condition.rtc,
-                condition.replan_steps,
+                pending.replan_steps,
                 args.rtc_blend_steps,
             )
             arrival_ages.append(age)
@@ -846,20 +1047,28 @@ def run_episode(
 
             if pending is None and steps >= next_request_step:
                 request_observation = clone_observation(observation)
-                available_step = steps + condition.delay_steps
+                sampled_delay_ms, sampled_delay_step_count = sample_delay()
+                sampled_replan = sample_replan()
+                sampled_delays_ms.append(sampled_delay_ms)
+                sampled_delay_steps.append(sampled_delay_step_count)
+                sampled_replans.append(sampled_replan)
+                available_step = steps + sampled_delay_step_count
                 pending = PendingInference(
                     future=executor.submit(
                         inference_job,
                         policy,
                         request_observation,
-                        condition.delay_ms,
+                        sampled_delay_ms,
                         condition.delay_domain,
                     ),
                     requested_step=steps,
                     available_step=available_step,
+                    delay_ms=sampled_delay_ms,
+                    delay_steps=sampled_delay_step_count,
+                    replan_steps=sampled_replan,
                 )
                 inference_requests += 1
-                next_request_step = steps + condition.replan_steps
+                next_request_step = steps + sampled_replan
                 # With a zero-step injected delay the response is due at this very
                 # step, so install it here instead of one step later.
                 install_if_ready()
@@ -904,6 +1113,12 @@ def run_episode(
             delay_steps=condition.delay_steps,
             replan_steps=condition.replan_steps,
             rtc=condition.rtc,
+            delay_jitter_variance_ms2=condition.delay_jitter_variance_ms2,
+            replan_jitter_variance_steps2=condition.replan_jitter_variance_steps2,
+            delay_jitter_distribution=condition.delay_jitter_distribution,
+            replan_jitter_distribution=condition.replan_jitter_distribution,
+            delay_jitter_cv2=condition.delay_jitter_cv2,
+            replan_jitter_cv2=condition.replan_jitter_cv2,
             episode=episode,
             seed=seed,
             layout_id=layout_id,
@@ -919,6 +1134,13 @@ def run_episode(
             mean_model_latency_ms=float(np.mean(model_latencies)),
             mean_total_inference_latency_ms=float(np.mean(total_latencies)),
             mean_block_wait_ms=float(np.mean(block_waits_ms)) if block_waits_ms else 0.0,
+            delay_sample_count=len(sampled_delays_ms),
+            mean_sampled_delay_ms=float(np.mean(sampled_delays_ms)) if sampled_delays_ms else float(condition.delay_ms),
+            sampled_delay_variance_ms2=float(np.var(sampled_delays_ms)) if sampled_delays_ms else 0.0,
+            mean_sampled_delay_steps=float(np.mean(sampled_delay_steps)) if sampled_delay_steps else float(condition.delay_steps),
+            replan_sample_count=len(sampled_replans),
+            mean_sampled_replan_steps=float(np.mean(sampled_replans)),
+            sampled_replan_variance_steps2=float(np.var(sampled_replans)),
             wall_time_s=time.perf_counter() - started,
         )
     except Exception as error:
@@ -931,6 +1153,12 @@ def run_episode(
             delay_steps=condition.delay_steps,
             replan_steps=condition.replan_steps,
             rtc=condition.rtc,
+            delay_jitter_variance_ms2=condition.delay_jitter_variance_ms2,
+            replan_jitter_variance_steps2=condition.replan_jitter_variance_steps2,
+            delay_jitter_distribution=condition.delay_jitter_distribution,
+            replan_jitter_distribution=condition.replan_jitter_distribution,
+            delay_jitter_cv2=condition.delay_jitter_cv2,
+            replan_jitter_cv2=condition.replan_jitter_cv2,
             episode=episode,
             seed=seed,
             layout_id=layout_id,
@@ -946,6 +1174,13 @@ def run_episode(
             mean_model_latency_ms=float(np.mean(model_latencies)) if model_latencies else 0.0,
             mean_total_inference_latency_ms=float(np.mean(total_latencies)) if total_latencies else 0.0,
             mean_block_wait_ms=float(np.mean(block_waits_ms)) if block_waits_ms else 0.0,
+            delay_sample_count=len(sampled_delays_ms),
+            mean_sampled_delay_ms=float(np.mean(sampled_delays_ms)) if sampled_delays_ms else float(condition.delay_ms),
+            sampled_delay_variance_ms2=float(np.var(sampled_delays_ms)) if sampled_delays_ms else 0.0,
+            mean_sampled_delay_steps=float(np.mean(sampled_delay_steps)) if sampled_delay_steps else float(condition.delay_steps),
+            replan_sample_count=len(sampled_replans),
+            mean_sampled_replan_steps=float(np.mean(sampled_replans)) if sampled_replans else float(condition.replan_steps),
+            sampled_replan_variance_steps2=float(np.var(sampled_replans)) if sampled_replans else 0.0,
             wall_time_s=time.perf_counter() - started,
             error=f"{type(error).__name__}: {error}",
         )
@@ -981,6 +1216,12 @@ def write_outputs(output_dir: Path, results: list[EpisodeResult], args: argparse
                 "delay_steps": result.delay_steps,
                 "replan_steps": result.replan_steps,
                 "rtc": result.rtc,
+                "delay_jitter_variance_ms2": result.delay_jitter_variance_ms2,
+                "replan_jitter_variance_steps2": result.replan_jitter_variance_steps2,
+                "delay_jitter_distribution": result.delay_jitter_distribution,
+                "replan_jitter_distribution": result.replan_jitter_distribution,
+                "delay_jitter_cv2": result.delay_jitter_cv2,
+                "replan_jitter_cv2": result.replan_jitter_cv2,
                 "num_episodes": 0,
                 "successes": 0,
                 "errors": 0,
@@ -996,6 +1237,13 @@ def write_outputs(output_dir: Path, results: list[EpisodeResult], args: argparse
                 "mean_total_inference_latency_ms": 0.0,
                 "mean_block_wait_ms": 0.0,
                 "mean_fallback_steps": 0.0,
+                "mean_delay_sample_count": 0.0,
+                "mean_sampled_delay_ms": 0.0,
+                "mean_sampled_delay_variance_ms2": 0.0,
+                "mean_sampled_delay_steps": 0.0,
+                "mean_replan_sample_count": 0.0,
+                "mean_sampled_replan_steps": 0.0,
+                "mean_sampled_replan_variance_steps2": 0.0,
             },
         )
         bucket["num_episodes"] += 1
@@ -1012,6 +1260,13 @@ def write_outputs(output_dir: Path, results: list[EpisodeResult], args: argparse
         bucket["mean_total_inference_latency_ms"] += result.mean_total_inference_latency_ms
         bucket["mean_block_wait_ms"] += result.mean_block_wait_ms
         bucket["mean_fallback_steps"] += result.fallback_steps
+        bucket["mean_delay_sample_count"] += result.delay_sample_count
+        bucket["mean_sampled_delay_ms"] += result.mean_sampled_delay_ms
+        bucket["mean_sampled_delay_variance_ms2"] += result.sampled_delay_variance_ms2
+        bucket["mean_sampled_delay_steps"] += result.mean_sampled_delay_steps
+        bucket["mean_replan_sample_count"] += result.replan_sample_count
+        bucket["mean_sampled_replan_steps"] += result.mean_sampled_replan_steps
+        bucket["mean_sampled_replan_variance_steps2"] += result.sampled_replan_variance_steps2
 
     for bucket in grouped.values():
         n = bucket["num_episodes"]
@@ -1028,6 +1283,13 @@ def write_outputs(output_dir: Path, results: list[EpisodeResult], args: argparse
             "mean_total_inference_latency_ms",
             "mean_block_wait_ms",
             "mean_fallback_steps",
+            "mean_delay_sample_count",
+            "mean_sampled_delay_ms",
+            "mean_sampled_delay_variance_ms2",
+            "mean_sampled_delay_steps",
+            "mean_replan_sample_count",
+            "mean_sampled_replan_steps",
+            "mean_sampled_replan_variance_steps2",
         ):
             bucket[key] /= n
 
@@ -1046,6 +1308,12 @@ def write_outputs(output_dir: Path, results: list[EpisodeResult], args: argparse
                 "legacy: worker sleeps for delay_ms on top of real model latency, "
                 "so staleness depends on model latency + injected delay"
             ),
+            "jitter": (
+                "when enabled, every asynchronous request samples the symmetric "
+                "two-point distribution mean +/- sqrt(variance); the target mean "
+                "and variance are recorded with each condition"
+            ),
+            "jitter_cv2": "CV^2 is variance divided by the nominal-condition mean squared.",
             "rtc_off": "replace queued plan with response chunk at index zero",
             "rtc_on": "align response to arrival step and linearly blend into queued plan",
         },
@@ -1242,6 +1510,55 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rtc", default="off,on")
     parser.add_argument("--rtc-blend-steps", type=int, default=4)
+    parser.add_argument(
+        "--delay-jitter-variance-ms2",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-request symmetric delay-jitter variance in ms^2. The two "
+            "support values are delay_ms +/- sqrt(variance), preserving the "
+            "configured delay mean exactly."
+        ),
+    )
+    parser.add_argument(
+        "--delay-jitter-cv2",
+        type=float,
+        default=None,
+        help="Delay jitter CV^2. With delay mean m, variance is CV^2 * m^2.",
+    )
+    parser.add_argument(
+        "--replan-jitter-variance-steps2",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-request symmetric replan-jitter variance in control-steps^2. "
+            "Its square root must be integral."
+        ),
+    )
+    parser.add_argument(
+        "--replan-jitter-cv2",
+        type=float,
+        default=None,
+        help="Replan jitter CV^2. With replan mean m, variance is CV^2 * m^2.",
+    )
+    parser.add_argument(
+        "--delay-jitter-distribution",
+        choices=("symmetric", "lower_bound_twopoint", "lognormal"),
+        default="symmetric",
+        help="Distribution used for delay jitter samples.",
+    )
+    parser.add_argument(
+        "--replan-jitter-distribution",
+        choices=("symmetric", "lower_bound_twopoint", "shifted_negative_binomial"),
+        default="symmetric",
+        help="Distribution used for replan jitter samples.",
+    )
+    parser.add_argument(
+        "--jitter-seed",
+        type=int,
+        default=20261007,
+        help="Seed for the paired per-request jitter-sign sequence.",
+    )
     parser.add_argument("--control-frequency", type=float, default=20.0)
     parser.add_argument(
         "--delay-step-frequency",
@@ -1330,6 +1647,32 @@ def main() -> None:
         raise ValueError("horizon must be positive")
     if any(delay < 0 for delay in delays):
         raise ValueError("injected delays must be non-negative")
+    if args.delay_jitter_cv2 is not None:
+        if args.delay_jitter_cv2 < 0:
+            raise ValueError("delay jitter CV^2 must be non-negative")
+        if args.delay_jitter_variance_ms2:
+            raise ValueError("use either --delay-jitter-cv2 or --delay-jitter-variance-ms2")
+        if len(set(delays)) != 1:
+            raise ValueError("--delay-jitter-cv2 requires exactly one delay mean")
+        args.delay_jitter_variance_ms2 = args.delay_jitter_cv2 * delays[0] ** 2
+    else:
+        args.delay_jitter_cv2 = (
+            args.delay_jitter_variance_ms2 / delays[0] ** 2 if len(set(delays)) == 1 else 0.0
+        )
+    if args.replan_jitter_cv2 is not None:
+        if args.replan_jitter_cv2 < 0:
+            raise ValueError("replan jitter CV^2 must be non-negative")
+        if args.replan_jitter_variance_steps2:
+            raise ValueError("use either --replan-jitter-cv2 or --replan-jitter-variance-steps2")
+        if len(set(replans)) != 1:
+            raise ValueError("--replan-jitter-cv2 requires exactly one replan mean")
+        args.replan_jitter_variance_steps2 = args.replan_jitter_cv2 * replans[0] ** 2
+    else:
+        args.replan_jitter_cv2 = (
+            args.replan_jitter_variance_steps2 / replans[0] ** 2 if len(set(replans)) == 1 else 0.0
+        )
+    if args.delay_jitter_variance_ms2 < 0 or args.replan_jitter_variance_steps2 < 0:
+        raise ValueError("jitter variances must be non-negative")
     delay_step_frequency = args.delay_step_frequency
     if delay_step_frequency is None:
         delay_step_frequency = args.control_frequency
@@ -1350,6 +1693,38 @@ def main() -> None:
     args.action_chunk_length = model_spec.action_chunk_length
     if any(replan < 1 for replan in replans):
         raise ValueError(f"replan steps must be positive; got {replans}")
+    if args.delay_jitter_variance_ms2:
+        if args.delay_jitter_distribution == "symmetric":
+            for delay in delays:
+                if math.sqrt(args.delay_jitter_variance_ms2) > delay:
+                    raise ValueError(
+                        "delay jitter support must remain non-negative: "
+                        f"delay={delay}, variance={args.delay_jitter_variance_ms2}"
+                    )
+    if args.replan_jitter_variance_steps2:
+        if args.replan_jitter_distribution == "symmetric":
+            deviation = math.sqrt(args.replan_jitter_variance_steps2)
+            if not math.isclose(deviation, round(deviation), abs_tol=1e-9):
+                raise ValueError("replan jitter variance must have an integer square root")
+            if any(replan - deviation < 1 for replan in replans):
+                raise ValueError(
+                    "replan jitter support must remain at least one step: "
+                    f"replans={replans}, variance={args.replan_jitter_variance_steps2}"
+                )
+        elif args.replan_jitter_distribution == "lower_bound_twopoint":
+            for replan in replans:
+                upper = replan + args.replan_jitter_variance_steps2 / (replan - 1.0)
+                if not math.isclose(upper, round(upper), abs_tol=1e-9):
+                    raise ValueError(
+                        "lower-bound replan jitter requires an integer upper support: "
+                        f"replan={replan}, variance={args.replan_jitter_variance_steps2}"
+                    )
+        elif args.replan_jitter_distribution == "shifted_negative_binomial":
+            if any(args.replan_jitter_variance_steps2 <= replan - 1 for replan in replans):
+                raise ValueError(
+                    "shifted negative-binomial replan jitter requires variance > mean - 1"
+                )
+    args.delay_step_frequency_resolved = delay_step_frequency
 
     conditions = [
         Condition(
@@ -1358,6 +1733,12 @@ def main() -> None:
             rtc=rtc,
             delay_steps=delay_in_steps(delay, delay_step_frequency),
             delay_domain=args.delay_domain,
+            delay_jitter_variance_ms2=args.delay_jitter_variance_ms2,
+            replan_jitter_variance_steps2=args.replan_jitter_variance_steps2,
+            delay_jitter_distribution=args.delay_jitter_distribution,
+            replan_jitter_distribution=args.replan_jitter_distribution,
+            delay_jitter_cv2=args.delay_jitter_cv2,
+            replan_jitter_cv2=args.replan_jitter_cv2,
         )
         for delay in delays
         for replan in replans

@@ -1,0 +1,65 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%labels
+    Author xunyuanliu
+    Description RoboDojo Isaac Sim 5.1 runtime for glibc-compatible Singularity execution
+
+%environment
+    export ACCEPT_EULA=Y
+    export PRIVACY_CONSENT=Y
+    export OMNI_KIT_ACCEPT_EULA=YES
+    export PIP_USER=0
+    export PYTHONNOUSERSITE=1
+    export PATH=/opt/miniconda3/envs/RoboDojo/bin:/opt/miniconda3/bin:$PATH
+    export CONDA_PREFIX=/opt/miniconda3/envs/RoboDojo
+    export PYTHONPATH=/workspace/robo/.deps/RoboDojo:/workspace/robo/.deps/RoboDojo/XPolicyLab:/workspace/robo
+
+%files
+    .deps/RoboDojo /opt/build/RoboDojo
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH=/opt/miniconda3/bin:$PATH
+    export PIP_USER=0
+    export PYTHONNOUSERSITE=1
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build pkg-config git git-lfs wget curl ncurses-bin \
+        ca-certificates ffmpeg netcat-openbsd \
+        libgl1 libglu1-mesa libglib2.0-0 libx11-6 libxext6 libxrender1 \
+        libsm6 libice6 libxrandr2 libxi6 libxcursor1 libxinerama1 libegl1 \
+        libvulkan1 vulkan-tools mesa-utils libxt6
+    rm -rf /var/lib/apt/lists/*
+
+    wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh
+    bash /tmp/miniconda.sh -b -p /opt/miniconda3
+    rm -f /tmp/miniconda.sh
+    conda create -n RoboDojo python=3.11 -y
+    conda run -n RoboDojo python -m pip install --upgrade pip
+
+    cd /opt/build/RoboDojo
+    conda run -n RoboDojo python -m pip install -r scripts/requirements.txt
+    conda run -n RoboDojo python -m pip install opencv-python-headless==4.11.0.86 pillow matplotlib scipy==1.15.3 scikit-learn numpy==1.26.0
+    conda run -n RoboDojo python -m pip install typing_extensions==4.12.2 filelock==3.13.1
+    conda run -n RoboDojo python -m pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+
+    # Use the NVIDIA wheel directly. The public PyPI source distribution is a
+    # placeholder and is selected on glibc-incompatible hosts.
+    ISAACSIM_WHEEL='https://pypi.nvidia.com/isaacsim/isaacsim-5.1.0.0-cp311-none-manylinux_2_35_x86_64.whl#sha256=ad2c027831ed5d4a62552735bb799dea4e4604530d2ab9b526ddb6cd19a98c11'
+    conda run -n RoboDojo python -m pip install \
+        "isaacsim[all,extscache] @ ${ISAACSIM_WHEEL}" \
+        --extra-index-url https://pypi.nvidia.com --prefer-binary
+
+    conda run -n RoboDojo bash third_party/IsaacLab/isaaclab.sh --install none
+    conda run -n RoboDojo bash scripts/install.sh --from curobo
+    conda run -n RoboDojo python -m pip install numpy==1.26.0 packaging==23.0 typing_extensions==4.12.2 filelock==3.13.1 websockets==12.0 click==8.1.7 psutil==5.9.8 scipy==1.15.3 warp-lang==1.11.0 'onnx>=1.18,<1.22' 'ipython<9' virtualenv==20.30.0
+    conda run -n RoboDojo python -m pip uninstall -y python-discovery || true
+
+    conda run -n RoboDojo python -c 'import importlib.util; required=("isaacsim","isaaclab","omni","pxr","yaml","torch"); missing=[name for name in required if importlib.util.find_spec(name) is None]; raise SystemExit(f"missing imports: {missing}") if missing else print("RoboDojo container imports: OK")'
+    rm -rf /opt/build
+
+%runscript
+    exec /opt/miniconda3/envs/RoboDojo/bin/python "$@"

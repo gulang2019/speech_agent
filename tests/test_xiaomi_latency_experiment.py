@@ -28,6 +28,10 @@ from scripts.xiaomi_latency_experiment import (
     pin_scene,
     resolve_replay_scene_mode,
     replay_episodes,
+    sample_symmetric_jitter,
+    sample_lower_bound_twopoint_jitter,
+    sample_lognormal_jitter,
+    sample_shifted_negative_binomial_jitter,
     video_name,
     wilson_interval,
 )
@@ -118,6 +122,67 @@ def test_delay_in_steps_matches_control_period():
     # step-domain delays do not depend on control frequency being real-time
     assert delay_in_steps(100, 0.0) == 0
     assert delay_in_steps(100, 10.0) == 1
+
+
+def test_symmetric_jitter_preserves_requested_moments_and_replan_integrality():
+    rng = np.random.default_rng(7)
+    delay = [sample_symmetric_jitter(100, 2_500, rng, integer=False) for _ in range(10_000)]
+    assert set(delay) == {50.0, 150.0}
+    np.testing.assert_allclose(np.mean(delay), 100.0, atol=1.5)
+    np.testing.assert_allclose(np.var(delay), 2_500.0, atol=5.0)
+
+    rng = np.random.default_rng(8)
+    replans = [sample_symmetric_jitter(10, 4, rng, integer=True) for _ in range(100)]
+    assert set(replans) == {8, 12}
+
+
+def test_lower_bound_jitter_supports_variance_above_symmetric_limit():
+    rng = np.random.default_rng(9)
+    values = [
+        sample_lower_bound_twopoint_jitter(
+            100, 90_000, rng, lower_bound=0, integer=False
+        )
+        for _ in range(20_000)
+    ]
+    assert set(values) == {0.0, 1000.0}
+    np.testing.assert_allclose(np.mean(values), 100.0, atol=4.0)
+    np.testing.assert_allclose(np.var(values), 90_000.0, atol=3_000.0)
+
+    rng = np.random.default_rng(10)
+    replans = [
+        sample_lower_bound_twopoint_jitter(
+            10, 180, rng, lower_bound=1, integer=True
+        )
+        for _ in range(100)
+    ]
+    assert set(replans) == {1, 30}
+
+
+def test_lognormal_and_shifted_negative_binomial_match_target_moments():
+    rng = np.random.default_rng(11)
+    delay = [sample_lognormal_jitter(100, 90_000, rng, integer=False) for _ in range(200_000)]
+    np.testing.assert_allclose(np.mean(delay), 100.0, rtol=0.03)
+    # Heavy-tailed lognormal variance converges slowly; validate with a
+    # tolerance appropriate for a finite Monte Carlo sample.
+    np.testing.assert_allclose(np.var(delay), 90_000.0, rtol=0.25)
+
+    rng = np.random.default_rng(12)
+    replans = [
+        sample_shifted_negative_binomial_jitter(
+            10, 180, rng, lower_bound=1, integer=True
+        )
+        for _ in range(200_000)
+    ]
+    assert min(replans) >= 1
+    np.testing.assert_allclose(np.mean(replans), 10.0, rtol=0.03)
+    np.testing.assert_allclose(np.var(replans), 180.0, rtol=0.12)
+
+
+def test_parser_converts_cv2_to_variance():
+    args = build_parser().parse_args(
+        ["--delays-ms", "100", "--replan-steps-list", "10", "--delay-jitter-cv2", "9"]
+    )
+    assert args.delay_jitter_cv2 == 9
 
 
 def test_parser_accepts_manifest_defined_scene_set_names():

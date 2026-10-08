@@ -116,7 +116,7 @@ def main() -> None:
     observed_rates = []
     complete_cells = 0
     print(f"Updated: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    print(f"Job: {args.job_id} | semantics: sim-domain delay, 20 Hz | concurrency cap: 2")
+    print(f"Job: {args.job_id} | semantics: sim-domain delay, 20 Hz")
     print("Cell                 Progress  Success  Avg/ep  Status")
     print("-------------------  --------  -------  ------  --------")
     for delay in DELAYS:
@@ -138,7 +138,7 @@ def main() -> None:
     failed = sum(states.get(state, 0) for state in ("FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY"))
     avg_episode = sum(observed_rates) / len(observed_rates) if observed_rates else 41.2
     remaining = TOTAL_CELLS * EPISODES_PER_CELL - total_done
-    slots = max(1, active if active else 2)
+    slots = max(1, active)
     eta_seconds = remaining * avg_episode / slots
     eta = datetime.now().astimezone() + timedelta(seconds=eta_seconds)
     success_rate = total_successes / total_done if total_done else 0.0
