@@ -17,6 +17,7 @@
 set -euo pipefail
 
 ROOT_DIR="${SLURM_SUBMIT_DIR:-/fact_home/xunyuanliu/dev/robo}"
+ROBO_DIR="${ROBODOJO_DIR:-${ROOT_DIR}/.deps/RoboDojo}"
 RUNTIME_DIR="${ROBODOJO_RUNTIME_DIR:-${ROOT_DIR}/.runtime/robodojo-singularity}"
 BASE_IMAGE="${ROBODOJO_BASE_IMAGE:-${ROOT_DIR}/.runtime/ubuntu-24.04.sif}"
 MARKER="${ROBODOJO_CONTAINER_MARKER:-${ROOT_DIR}/.runtime/RoboDojo-singularity.ready}"
@@ -59,7 +60,7 @@ fi
 
 echo "Installing RoboDojo Python dependencies in the container"
 container_bash 'source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda install -n RoboDojo -c conda-forge gcc_linux-64 gxx_linux-64 libxml2 libglu libglvnd xorg-libx11 xorg-libxext xorg-libxt xorg-libxfixes xorg-libxi xorg-libxrender xorg-libxrandr xorg-libxinerama xorg-libxcursor xorg-libsm xorg-libice -y'
-container_bash "source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/.deps/RoboDojo && python -m pip install --upgrade pip && python -m pip install -r scripts/requirements.txt && python -m pip install opencv-python-headless==4.11.0.86 pillow matplotlib scipy==1.15.3 scikit-learn numpy==1.26.0 && python -m pip install --no-deps 'https://files.pythonhosted.org/packages/1c/2c/8a0b02d60a1dbbae7faa5af30484b016aa3023f9833dfc0d19b0b770dd6a/botocore-1.39.11-py3-none-any.whl#sha256=1545352931a8a186f3e977b1e1a4542d7d434796e274c3c62efd0210b5ea76dc' && python -m pip install --no-deps 'https://files.pythonhosted.org/packages/72/66/88566a6484e746c0b075f7c9bb248e8548eda0a486de4460d150a41e2d57/boto3-1.39.11-py3-none-any.whl#sha256=af8f1dad35eceff7658fab43b39b0f55892b6e3dd12308733521cc24dd2c9a02' && ROBODOJO_SKIP_SYSTEM_DEPS=1 ISAACSIM_WHEEL_URL='${ISAACSIM_WHEEL_URL}' bash scripts/install.sh --from isaacsim"
+    container_bash "source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/${ROBO_DIR#${ROOT_DIR}/} && python -m pip install --upgrade pip && python -m pip install -r scripts/requirements.txt && python -m pip install opencv-python-headless==4.11.0.86 pillow matplotlib scipy==1.15.3 scikit-learn numpy==1.26.0 && python -m pip install --no-deps 'https://files.pythonhosted.org/packages/1c/2c/8a0b02d60a1dbbae7faa5af30484b016aa3023f9833dfc0d19b0b770dd6a/botocore-1.39.11-py3-none-any.whl#sha256=1545352931a8a186f3e977b1e1a4542d7d434796e274c3c62efd0210b5ea76dc' && python -m pip install --no-deps 'https://files.pythonhosted.org/packages/72/66/88566a6484e746c0b075f7c9bb248e8548eda0a486de4460d150a41e2d57/boto3-1.39.11-py3-none-any.whl#sha256=af8f1dad35eceff7658fab43b39b0f55892b6e3dd12308733521cc24dd2c9a02' && ROBODOJO_SKIP_SYSTEM_DEPS=1 ISAACSIM_WHEEL_URL='${ISAACSIM_WHEEL_URL}' bash scripts/install.sh --from isaacsim"
 
 if [[ "${ROBODOJO_SKIP_SIM_SMOKE:-0}" != "1" ]]; then
     container_bash "source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && python -c 'from isaacsim import SimulationApp; app=SimulationApp({\"headless\": True, \"enable_cameras\": False}); from pxr import Usd; import isaaclab, curobo, torch; print(\"RoboDojo SimulationApp smoke: OK\", Usd.GetVersion(), torch.__version__); app.close()'"
@@ -67,14 +68,14 @@ else
     echo "Skipping Singularity SimulationApp smoke; the one-click runner validates Isaac through its user-local glibc rootfs."
 fi
 
-if [[ ! -d "${ROOT_DIR}/.deps/RoboDojo/Assets/Robots" || ! -d "${ROOT_DIR}/.deps/RoboDojo/Assets/Object/RoboDojo" ]]; then
+if [[ ! -d "${ROBO_DIR}/Assets/Robots" || ! -d "${ROBO_DIR}/Assets/Object/RoboDojo" ]]; then
     echo "Downloading RoboDojo assets"
-    container_bash 'source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/.deps/RoboDojo && bash scripts/init_assets.sh'
+    container_bash "source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/${ROBO_DIR#${ROOT_DIR}/} && bash scripts/init_assets.sh"
 fi
 
-container_bash 'source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/.deps/RoboDojo && python utils/update_embodiment_config_path.py'
+container_bash "source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/${ROBO_DIR#${ROOT_DIR}/} && python utils/update_embodiment_config_path.py"
 
-container_bash 'source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/.deps/RoboDojo && bash scripts/internal/verify_install.sh --skip-isaac'
+container_bash "source /opt/robo-state/miniconda3/etc/profile.d/conda.sh && conda activate RoboDojo && cd /workspace/robo/${ROBO_DIR#${ROOT_DIR}/} && bash scripts/internal/verify_install.sh --skip-isaac"
 
 tmp="${MARKER}.tmp.${SLURM_JOB_ID:-local}"
 printf 'base_image=%s\nruntime_dir=%s\nready\n' "${BASE_IMAGE}" "${RUNTIME_DIR}" > "${tmp}"

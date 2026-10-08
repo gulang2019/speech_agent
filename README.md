@@ -171,19 +171,33 @@ The benchmark-specific setup and model paths are documented in `INSTALL.md`.
 ## RoboDojo `pour_liquid_into_cup` Xiaomi smoke
 
 The RoboDojo compatibility bridge and delay x replan smoke runner are included
-in this branch. The one-click entry point submits itself to the
-`gpu-scavenger` Slurm partition when run outside an allocation:
+in this branch. The one-click entry point supports both Slurm allocation and a
+direct CUDA-visible-device run:
 
 ```bash
 cd /fact_home/xunyuanliu/dev/robo
+# Recommended: submit to gpu-scavenger; Slurm sets CUDA_VISIBLE_DEVICES.
 bash scripts/robodojo_pour_liquid_one_click.sh
+
+# Direct mode: use only the CUDA device exposed by this process.
+CUDA_VISIBLE_DEVICES=0 ROBODOJO_RUN_MODE=direct \
+  bash scripts/robodojo_pour_liquid_one_click.sh
 ```
 
-It reuses user-local checkouts, model weights, and caches when present. Missing
-RoboDojo/XPolicyLab checkouts, the Xiaomi RoboCasa checkpoint, RoboDojo assets,
-and the Ubuntu 24.04 rootfs are deployed under `.deps/`, `models/`, and
-`.runtime/`; no system driver, Singularity configuration, or physical GPU index
-is changed. Slurm remains responsible for GPU allocation and visibility.
+The script is cold-start capable. Missing RoboDojo and XPolicyLab checkouts,
+the isolated Xiaomi policy environment, PyTorch/Transformers dependencies, the
+Xiaomi RoboCasa checkpoint, RoboDojo assets, Miniconda/Isaac Sim runtime, and
+the Ubuntu 24.04 rootfs are downloaded or created under `.deps/`, `models/`,
+and `.runtime/`. Existing resources are only reused after their required files
+and imports pass validation. It does not change system drivers, Singularity
+configuration, or physical GPU numbering. Slurm or the caller's
+`CUDA_VISIBLE_DEVICES` controls GPU visibility; Isaac's `device_id=0` is only
+the local ordinal inside that visibility mask.
+
+The host must provide the non-downloadable execution primitives
+`nvidia-smi`, `bwrap`, `singularity`, `unsquashfs`, `curl`, and Python >=3.10;
+the Slurm mode additionally requires `sbatch`. The script fails early with the
+missing command if the server does not provide one of them.
 
 Before evaluation, the script verifies task metadata, GPU/Vulkan access, the
 Xiaomi WebSocket server, and a headless Isaac SimulationApp. Isaac runs in a

@@ -67,3 +67,26 @@ The exact task metadata is in
 [`configs/robodojo_tasks.json`](../configs/robodojo_tasks.json), and the
 conversion code is in
 [`scripts/robodojo_compat.py`](../scripts/robodojo_compat.py).
+
+## One-click deployment
+
+From a fresh checkout, the deployment script downloads missing user-local
+resources and then runs the preflight and delay x replan smoke:
+
+```bash
+bash scripts/robodojo_pour_liquid_one_click.sh
+```
+
+The default mode submits one GPU job to `gpu-scavenger`. For a process that
+already has a GPU allocation, run directly with an explicit visibility mask:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 ROBODOJO_RUN_MODE=direct \
+  bash scripts/robodojo_pour_liquid_one_click.sh
+```
+
+The script requires host-provided `nvidia-smi`, Bubblewrap, Singularity,
+`unsquashfs`, `curl`, and Python >=3.10. Slurm mode additionally requires
+`sbatch`. It does not install system packages or modify global GPU/runtime
+configuration. Everything it downloads or builds is placed below `.deps/`,
+`models/`, or `.runtime/`.

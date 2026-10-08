@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Deploy/check/run RoboDojo pour_liquid_into_cup with the Xiaomi bridge.
-# Outside Slurm this script submits itself to gpu-scavenger.
+#
+# GPU modes:
+#   ROBODOJO_RUN_MODE=slurm  (default) submit/use gpu-scavenger
+#   ROBODOJO_RUN_MODE=direct execute now; CUDA_VISIBLE_DEVICES is required
 
 #SBATCH --job-name=rdj-xiaomi-oneclick
 #SBATCH --output=logs/rdj-xiaomi-oneclick-%j.out
@@ -17,8 +20,10 @@ set -euo pipefail
 
 ROOT_DIR="${ROBODOJO_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ROBO_DIR="${ROBODOJO_DIR:-${ROOT_DIR}/.deps/RoboDojo}"
-XPOLICY_DIR="${XPOLICYLAB_DIR:-${ROOT_DIR}/.deps/XPolicyLab}"
-POLICY_PYTHON="${POLICY_PYTHON:-${ROOT_DIR}/.conda-env/bin/python}"
+XPOLICY_DIR="${XPOLICYLAB_DIR:-${ROBO_DIR}/XPolicyLab}"
+POLICY_ENV="${ROBODOJO_POLICY_ENV:-${ROOT_DIR}/.runtime/xiaomi-policy}"
+POLICY_PYTHON="${POLICY_PYTHON:-${POLICY_ENV}/bin/python}"
+POLICY_BOOTSTRAP_PYTHON="${POLICY_BOOTSTRAP_PYTHON:-python3}"
 MODEL_PATH="${MODEL_PATH:-${ROOT_DIR}/models/xiaomi-robotics-1-robocasa}"
 RUNTIME_DIR="${ROBODOJO_RUNTIME_DIR:-${ROOT_DIR}/.runtime/robodojo-singularity}"
 BASE_IMAGE="${ROBODOJO_BASE_IMAGE:-${ROOT_DIR}/.runtime/ubuntu-24.04.sif}"
@@ -28,18 +33,51 @@ EPISODES="${EPISODES:-1}"
 DELAYS_MS="${DELAYS_MS:-0,100,300}"
 REPLAN_STEPS_LIST="${REPLAN_STEPS_LIST:-1,5,10}"
 DOWNLOAD_MODEL="${DOWNLOAD_MODEL:-1}"
+RUN_MODE="${ROBODOJO_RUN_MODE:-slurm}"
+ROBODOJO_REF="${ROBODOJO_REF:-266130a3ec41ba9b20b0e5648d2f3542f219c06c}"
 TASK_NAME="pour_liquid_into_cup"
 POLICY_NAME="RoboDojo_Xiaomi_Compat"
 PORT="${ROBODOJO_POLICY_PORT:-$((20000 + (${SLURM_JOB_ID:-1} % 20000)))}"
 
-if [[ -z "${SLURM_JOB_ID:-}" ]]; then
-    cd "${ROOT_DIR}"
-    mkdir -p logs
-    job_id="$(sbatch --parsable "$0")"
-    echo "Submitted RoboDojo one-click job: ${job_id}"
-    echo "Logs: ${ROOT_DIR}/logs/rdj-xiaomi-oneclick-${job_id}.out"
-    exit 0
-fi
+case "${RUN_MODE}" in
+    slurm)
+        if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+            command -v sbatch >/dev/null 2>&1 || {
+                echo "Slurm mode requires sbatch; use ROBODOJO_RUN_MODE=direct with CUDA_VISIBLE_DEVICES instead" >&2
+                exit 2
+            }
+            cd "${ROOT_DIR}"
+            mkdir -p logs
+            job_id="$(sbatch --parsable "$0")"
+            echo "Submitted RoboDojo one-click job: ${job_id}"
+            echo "Logs: ${ROOT_DIR}/logs/rdj-xiaomi-oneclick-${job_id}.out"
+            exit 0
+        fi
+        ;;
+    direct)
+        [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]] || {
+            echo "ROBODOJO_RUN_MODE=direct requires CUDA_VISIBLE_DEVICES, e.g. CUDA_VISIBLE_DEVICES=0" >&2
+            exit 2
+        }
+        ;;
+    auto)
+        if [[ -z "${SLURM_JOB_ID:-}" && -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+            command -v sbatch >/dev/null 2>&1 || {
+                echo "auto mode could not find sbatch and CUDA_VISIBLE_DEVICES is empty" >&2
+                exit 2
+            }
+            cd "${ROOT_DIR}"
+            mkdir -p logs
+            job_id="$(sbatch --parsable "$0")"
+            echo "Submitted RoboDojo one-click job: ${job_id}"
+            exit 0
+        fi
+        ;;
+    *)
+        echo "ROBODOJO_RUN_MODE must be slurm, direct, or auto" >&2
+        exit 2
+        ;;
+esac
 
 cd "${ROOT_DIR}"
 mkdir -p logs "${OUTPUT_ROOT}"
@@ -51,21 +89,78 @@ log() { printf '[robodojo-oneclick] %s\n' "$*"; }
 die() { printf '[robodojo-oneclick] ERROR: %s\n' "$*" >&2; exit 2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
-for command_name in bwrap singularity unsquashfs git nvidia-smi sha256sum timeout; do
+for command_name in bwrap singularity unsquashfs git nvidia-smi sha256sum timeout curl; do
     need "${command_name}"
 done
 [[ -n "${CUDA_VISIBLE_DEVICES:-}" ]] || die "CUDA_VISIBLE_DEVICES is empty; use Slurm"
 
-clone_if_missing() {
-    local path="$1" url="$2"
-    [[ -d "${path}/.git" ]] && return
-    mkdir -p "$(dirname "${path}")"
+clone_robodojo_if_missing() {
+    [[ -e "${ROBO_DIR}/.git" ]] && return
+    local url="${ROBODOJO_REPO_URL:-https://github.com/RoboDojo-Benchmark/RoboDojo.git}"
+    mkdir -p "$(dirname "${ROBO_DIR}")"
+    log "Cloning RoboDojo at ${ROBODOJO_REF}"
+    git clone --recurse-submodules "${url}" "${ROBO_DIR}"
+    git -C "${ROBO_DIR}" checkout --detach "${ROBODOJO_REF}"
+    git -C "${ROBO_DIR}" submodule update --init --recursive
+}
+
+clone_xpolicylab_if_missing() {
+    [[ -e "${XPOLICY_DIR}/.git" ]] && return
+    [[ "${XPOLICY_DIR}" == "${ROBO_DIR}/XPolicyLab" ]] \
+        && die "RoboDojo clone is missing its XPolicyLab submodule"
+    local url="${XPOLICYLAB_REPO_URL:-https://github.com/XPolicyLab/XPolicyLab.git}"
+    mkdir -p "$(dirname "${XPOLICY_DIR}")"
     log "Cloning ${url}"
-    git clone --filter=blob:none "${url}" "${path}"
+    git clone --filter=blob:none "${url}" "${XPOLICY_DIR}"
+}
+
+ensure_policy_environment() {
+    if [[ ! -x "${POLICY_PYTHON}" ]]; then
+        need "${POLICY_BOOTSTRAP_PYTHON}"
+        "${POLICY_BOOTSTRAP_PYTHON}" - <<'PY'
+import sys
+if sys.version_info < (3, 10):
+    raise SystemExit("XPolicyLab requires Python >= 3.10")
+PY
+        log "Creating isolated Xiaomi policy environment: ${POLICY_ENV}"
+        "${POLICY_BOOTSTRAP_PYTHON}" -m venv "${POLICY_ENV}"
+    fi
+
+    if "${POLICY_PYTHON}" - <<'PY' >/dev/null 2>&1
+import msgpack
+import msgpack_numpy
+import numpy
+import PIL
+import pydantic
+import torch
+import transformers
+import websockets
+assert transformers.__version__ == "4.57.1"
+assert torch.version.cuda is not None
+PY
+    then
+        return
+    fi
+
+    log "Installing Xiaomi policy dependencies"
+    "${POLICY_PYTHON}" -m pip install --upgrade pip
+    "${POLICY_PYTHON}" -m pip install \
+        torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
+        --index-url "${POLICY_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
+    "${POLICY_PYTHON}" -m pip install \
+        transformers==4.57.1 accelerate==1.5.2 \
+        huggingface_hub safetensors "numpy<2" pillow scipy \
+        pyyaml "websockets>=14" "msgpack>=1.0.8" msgpack-numpy \
+        "pydantic>=2.5" opencv-python-headless
+    "${POLICY_PYTHON}" -m pip install -e "${XPOLICY_DIR}"
 }
 
 ensure_model() {
-    [[ -f "${MODEL_PATH}/config.json" ]] && return
+    if [[ -f "${MODEL_PATH}/config.json" && -f "${MODEL_PATH}/model.safetensors.index.json" ]] \
+        && find "${MODEL_PATH}" -maxdepth 1 -name 'model-*.safetensors' -type f -print -quit \
+            | grep -q .; then
+        return
+    fi
     [[ "${DOWNLOAD_MODEL}" == 1 ]] || die "missing model: ${MODEL_PATH}"
     [[ -x "${POLICY_PYTHON}" ]] || die "missing policy Python: ${POLICY_PYTHON}"
     log "Downloading Xiaomi-Robotics-1-RoboCasa"
@@ -83,7 +178,9 @@ PY
 ensure_runtime() {
     [[ -x "${RUNTIME_DIR}/miniconda3/envs/RoboDojo/bin/python" ]] && return
     log "Installing RoboDojo runtime in user storage"
-    ROBODOJO_SKIP_SIM_SMOKE=1 bash "${ROOT_DIR}/slurm/setup_robodojo_singularity_gpu_scavenger.sbatch"
+    SLURM_SUBMIT_DIR="${ROOT_DIR}" ROBODOJO_DIR="${ROBO_DIR}" \
+        ROBODOJO_SKIP_SIM_SMOKE=1 \
+        bash "${ROOT_DIR}/slurm/setup_robodojo_singularity_gpu_scavenger.sbatch"
 }
 
 ensure_assets() {
@@ -125,6 +222,12 @@ ensure_rootfs() {
         rm -rf "${build_dir}"
     fi
     mkdir -p "${rootfs}/workspace" "${rootfs}/opt/host-vulkan"
+    libc_line="$(${rootfs}/lib64/ld-linux-x86-64.so.2 \
+        --library-path "${rootfs}/lib/x86_64-linux-gnu:${rootfs}/usr/lib/x86_64-linux-gnu" \
+        "${rootfs}/lib/x86_64-linux-gnu/libc.so.6" 2>/dev/null | head -n 1)"
+    if ! printf '%s\n' "${libc_line}" | grep -Eq 'GLIBC 2\.(3[5-9]|[4-9][0-9])'; then
+        die "Ubuntu rootfs glibc is too old for Isaac Sim 5.1: ${libc_line}"
+    fi
     ROOTFS="${rootfs}"
 }
 
@@ -138,8 +241,9 @@ install_policy_entrypoint() {
     done
 }
 
-clone_if_missing "${ROBO_DIR}" "${ROBODOJO_REPO_URL:-https://github.com/RoboDojo-Benchmark/RoboDojo.git}"
-clone_if_missing "${XPOLICY_DIR}" "${XPOLICYLAB_REPO_URL:-https://github.com/XPolicyLab/XPolicyLab.git}"
+clone_robodojo_if_missing
+clone_xpolicylab_if_missing
+ensure_policy_environment
 ensure_model
 ensure_runtime
 ensure_rootfs
